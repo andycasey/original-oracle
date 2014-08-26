@@ -1,7 +1,15 @@
+# Meta
+.gitignore
+
+# Ignore build stuff
 si/si_lineform
+*.o
 build/
 dist/
 *.egg-info/
-.gitignore
 *.pyc
-*.o
+
+# Ignore (output) images
+*.png
+*.jpg
+*.pdf

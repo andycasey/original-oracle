@@ -1720,8 +1720,8 @@ class GenerativeModel(Model):
         return parameter_guess
 
 
-    def optimise(self, data, initial_theta=None, synth_kwargs=None, maxfun=10e3,
-        maxiter=10e3, xtol=0.001, ftol=0.001, full_output=False):
+    def optimise(self, data, initial_theta=None, synth_kwargs=None, maxfun=10e2,
+        maxiter=10e2, xtol=0.001, ftol=0.001, full_output=False):
         """
         Optimise the logarithmic probability of the model parameters theta given
         the data.
@@ -1793,6 +1793,7 @@ class GenerativeModel(Model):
             "maxiter": maxiter,
             "xtol": xtol,
             "ftol": ftol,
+            "disp": False,
             "full_output": True # Necessary for introspection and provenance.
         }
         t_init = time()
@@ -1807,6 +1808,7 @@ class GenerativeModel(Model):
 
         op_theta_dict = dict(zip(self.parameters, op_theta))
 
+        raise a
 
         if full_output:
             return (op_theta_dict, op_fopt, op_niter, op_funcalls, op_warnflag)

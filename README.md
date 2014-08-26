@@ -1,4 +1,4 @@
-**oracle, the suppository of all knowledge**
+**oracle, the suppository of all wisdom**
 ============================================
 
 **Getting Started**

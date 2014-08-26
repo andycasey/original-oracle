@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-""" operation put spectroscopists out of a job """
+""" oracle, the suppository of all wisdom """
 
 from __future__ import division, print_function
 
@@ -21,39 +21,82 @@ from time import time
 import numpy as np
 import pyfits
 
+import plot
 import models
 import specutils
+
+logger = logging.getLogger("oracle")
+
+def _check_for_existing_files(args):
+    """ Create a list of files that the argument parser will create then check
+    to see if those files already exist. """
+
+    if args.clobber:
+        return None
+
+    files_produced = []
+    if args.command == "solve":
+        files_produced.append("{0}-initial.{1}".format(args.output_prefix,
+            args.plot_fmt))
+
+    filename_exists = map(os.path.exists, files_produced)
+    if any(filename_exists):
+        raise IOError("output filename(s) {0} exist and we have been asked not"\
+            " to clobber them.".format(" ".join([f for f in files_produced \
+                if os.path.exists(f)])))
 
 
 def solve(args):
 
     # Load the configuration file into a model.
+    if args.analysis_type != "generative":
+        raise NotImplementedError("only generative analyses are currently "\
+            "available from the command line function")
+
+    # Before doing heaps of analysis, look to see if we intend to create some
+    # files and if those files already exist -- and we have been told not to 
+    # clobber them -- then we should raise an exception now before doing any
+    # real work
+    _check_for_existing_files(args)
+
     model = models.GenerativeModel(args.config_filename)
     logger.info("Model parameters: {0}".format(", ".join(model.parameters)))
 
     # Load the spectra.
     spectra = map(specutils.Spectrum.load, args.spectra_filenames)
 
-    # Make some initial guess of the model parameters based on the prior
-    # distributions and some suitable approximations.
-    # NB: This is performed automatically by star.optimise if we supply nothing,
-    #     but we would like to keep track of what the initial guess was.
+    # Make some initial guess of the model parameters.
     initial_guess = model.initial_guess(spectra)
     logger.info("Initial guess for model parameters:")
     for parameter, value in initial_guess.iteritems():
-        logger.info("{0}: {1:.2f}".format(parameter, value))
+        logger.info("\t{0}: {1:.2f}".format(parameter, value))
 
-    # Create figure showing initial guess?
-    
+    # Create figure showing the initial guess
+    if args.plotting:
+        path = os.path.abspath(os.path.expanduser(
+            "{0}-initial.{1}".format(args.output_prefix, args.plot_fmt)))
+        fig = plot.comparison(spectra, model, initial_guess)
+        fig.savefig(path)
+        logger.info("Saved model spectrum of initial theta to {0}".format(path))
+        plt.close("all")
+   
     # Perform the optimisation from the initial guess point.
     optimised_theta = star.optimise(spectra, initial_guess)
 
     # Plot a projection showing the optimised theta
+    if args.plotting:
+        path = os.path.abspath(os.path.expanduser(
+            "{0}-optimal.{1}".format(args.output_prefix, args.plot_fmt)))
+        fig = plot.comparison(spectra, model, optimised_theta)
+        fig.savefig(path)
+        logger.info("Saved model spectrum of optimal theta to {0}".format(path))
+        plt.close("all")
 
     # Plot the model parameter values against clock time?
 
     # Inference!
     
+    # 
 
 
 
@@ -61,10 +104,15 @@ def solve(args):
 def main():
     """ Parse arguments and execute a particular subparser. """
 
-    parser = argparse.ArgumentParser(description="unnamed",
-        epilog="Email Andy Casey <arc@ast.cam.ac.uk> with any questions.")
+    parser = argparse.ArgumentParser(description="oracle",
+        epilog="Contact Andy Casey <arc@ast.cam.ac.uk> with any questions, and "\
+        "open a GitHub issue to report a bug or request a feature.")
     
-    #COMMAND <solve> config.yaml <spectra>
+    # oracle solve generative config.yaml <spectra>
+    # (solve does optimise and infer)
+    # oracle optimise generative config.yaml <spectra>
+    # oracle infer generative config.yaml <spectra>
+
 
     # Create subparsers
     subparsers = parser.add_subparsers(title="command", dest="command",
@@ -75,21 +123,42 @@ def main():
     parent_parser.add_argument("-v", "--verbose", dest="verbose",
         action="store_true", default=False,
         help="Vebose mode. Logger will print debugging messages.")
+
     parent_parser.add_argument("--clobber", dest="clobber", action="store_true",
         default=False,
         help="Overwrite existing files if they already exist.")
+
     parent_parser.add_argument("--debug", dest="debug", action="store_true",
         default=False,
         help="Debug mode. Any suppressed exception during runtime will be re-raised.")
+
 
     # Create parser for the solve command
     solve_parser = subparsers.add_parser("solve", parents=[parent_parser],
         help="Compute posterior probability distributions for the model "\
         "parameters, given the data.")
+
+    solve_parser.add_argument("analysis_type", type=str,
+        choices=("generative", "classical"),
+        help="The kind of analysis to perform. Available options are: classical"\
+        " or generative (default: %(default)s).")
+
     solve_parser.add_argument("config_filename", type=str,
         help="The configuration filename in YAML- or JSON-style formatting.")
+
     solve_parser.add_argument("spectra_filenames", nargs="+",
         help="Filenames of (observed) spectroscopic data.")
+
+    solve_parser.add_argument("--no-plots", dest="plotting", action="store_false",
+        default=True, help="Disable plotting.")
+
+    solve_parser.add_argument("--output-prefix", "-o", dest="output_prefix",
+        default="oracle", help="The filename prefix to use for all output files.")
+
+    solve_parser.add_argument("--plot-format", "-pf", dest="plot_fmt",
+        action="store", type=str, default="png", help="Format for output plots "\
+        "(default: %(default)s). Available formats are (case insensitive):"
+        " PDF, JPG, PNG, EPS")
     solve_parser.set_defaults(func=solve)
 
     # Parse arguments and specify logging level

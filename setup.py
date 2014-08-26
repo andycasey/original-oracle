@@ -1,6 +1,6 @@
 # coding: utf-8
 
-""" oracle, the suppository of knowledge """ 
+""" oracle, the suppository of wisdom """ 
 
 import os
 import re
@@ -55,7 +55,7 @@ setup(name="oracle",
     packages=["oracle"],
     url="http://www.github.com/andycasey/oracle/",
     license="MIT",
-    description="the suppository of all knowledge",
+    description="the suppository of all wisdom",
     long_description=readfile(os.path.join(os.path.dirname(__file__), "README.md")),
     install_requires=readfile(
         os.path.join(os.path.dirname(__file__), "requirements.txt")).split("\n"),

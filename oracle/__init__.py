@@ -1,6 +1,6 @@
 # coding: utf-8
 
-""" oracle, the suppository of all knowledge """ 
+""" oracle, the suppository of all wisdom """ 
 
 __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 __version__ = "0.01"
