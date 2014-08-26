@@ -53,11 +53,11 @@ def comparison(observed_spectra, model, theta, figsize=None,
     for ax, observed_spectrum, model_spectrum \
     in zip(axes, observed_spectra, model_spectra):
 
-        # Plot the spectra.
+        # Plot the spectra
         ax.plot(observed_spectrum.disp, observed_spectrum.flux, observed_color)
         ax.plot(model_spectrum[:, 0], model_spectrum[:, 1], model_color)
 
-        # Show a mask.
+        # Show the mask
         obs_start, obs_end = observed_spectrum.disp[0], observed_spectrum.disp[-1]
         for start, end in mask:
             if obs_end >= start and start >= obs_start \
@@ -66,6 +66,7 @@ def comparison(observed_spectra, model, theta, figsize=None,
                 ax.axvspan(start, end, facecolor=mask_color, alpha=mask_alpha,
                     edgecolor='none')
 
+        ax.set_xlim(obs_start, obs_end)
         ax.set_xlabel("Wavelength, $\lambda$ ($\AA$)")
         ax.set_ylabel("Flux, $F_\lambda$")
 

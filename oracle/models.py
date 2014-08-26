@@ -1808,10 +1808,8 @@ class GenerativeModel(Model):
 
         op_theta_dict = dict(zip(self.parameters, op_theta))
 
-        raise a
-
         if full_output:
-            return (op_theta_dict, op_fopt, op_niter, op_funcalls, op_warnflag)
+            return (op_theta_dict, op_fopt, op_niter, op_nfunc, op_warnflag)
         return op_theta_dict
 
 
@@ -1864,6 +1862,8 @@ class GenerativeModel(Model):
 
         if synth_kwargs is None:
             synth_kwargs = {}
+
+        synth_kwargs["full_output"] = False
 
         # Request the wavelength step to be ~twice the observed pixel sampling.
         #if data is not None:

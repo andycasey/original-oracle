@@ -665,7 +665,7 @@ def synthesise(teff, logg, metallicity, xi, wavelengths,
         with instance() as si:
             for wavelength_range, wavelength_step in zip(wavelengths, wavelength_steps):
                 spectra.append(si.synthesise(teff, logg, metallicity, xi,
-                    wavelength_range, wavelength_step, abundances, True))
+                    wavelength_range, wavelength_step, abundances, False))
     else:
         # Thread dat shit.
         if chunk:

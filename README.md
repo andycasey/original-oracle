@@ -82,10 +82,10 @@ work for anyone else to see!
 
 
 
-** Reporting bugs and requesting features **
-   
-If it's a bug, please [open an issue](http://github.com/andycasey/oracle/issues/new) describing what you were trying to do, what you
-expected the behaviour to be, and how the code actually behaved. Include any relevant log/terminal output, figures or links to test data.
+**Reporting bugs and requesting features**
 
-If it's a feature request, please [open an issue](http://github.com/andycasey/oracle/issues/new) describing the feature you would like.
-Be as specific as possible and include any relevant equations/figures.
+Please [open an issue](http://github.com/andycasey/oracle/issues/new) to report a bug or request a feature. Bug reports should include:
+what you were trying to do, the behaviour you expected, and the output from the code. Include any log/terminal output, figures, or links
+to test data to reproduce the bug. Feature requests should be as detailed and specific as possible. Include relevant figures, equations
+and links.
+
