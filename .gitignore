@@ -1,0 +1,7 @@
+si/si_lineform
+build/
+dist/
+*.egg-info/
+.gitignore
+*.pyc
+*.o
