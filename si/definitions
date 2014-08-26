@@ -1,0 +1,6 @@
+#  
+# DEFINES ENVIRONMENT VARIABLES FOR SIU 
+#  
+  export  DATA_HOME=~/Dropbox/SI/fortran
+  # Should be CWD
+  export  SIU_MAIN=$DATA_HOME/code      # prev. SIU$MAIN

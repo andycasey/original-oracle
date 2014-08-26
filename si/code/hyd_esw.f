@@ -1,0 +1,82 @@
+      SUBROUTINE HYD_ESW(divtn,w,n,kappa_lam)
+C-----THIS SUBROUTINE CALCULATES THE LINE OPACITIES FOR HYDROGEN LINES ( LYMAN, 
+C-----BALMER ) ACCORDING TO THE ESW - THEORY ( STARK - BROADENING );
+C-----CORRECTION FOR STIMULATED EMISSION IS NOT INCLUDED
+      IMPLICIT REAL*8 (A-H,O-Z)
+      REAL*8 W3
+      REAL*8 GAUNT(2),W0(2,18),STARK(2,18)
+     *       ,ZMN(2,18),ALPHA0(2,18),w_edge(2)
+C-----DATA FOR LINE-ABSORPTION COEFFICIENTS
+
+      INCLUDE 'physcnst.inc'
+      INCLUDE 'lf_decl0.inc'
+
+      DATA GAUNT  /1.6678E-2, 2.2896E-3/
+      DATA W_EDGE/911.76D-8,3647.04D-8/ 
+  
+      DATA W0/0.D-8,0.D-8,1215.68D-8,0.D-8,1025.73D-8,
+     *        6562.82D-8,972.55D-8,4861.33D-8,949.75D-8,4340.47D-8,
+     *        937.81D-8,4101.74D-8,930.76D-8,3970.07D-8,926.23D-8,
+     *        3889.05D-8,923.16D-8,3835.39D-8,920.97D-8,3797.90D-8,
+     *        919.36D-8,3770.63D-8,918.14D-8,3750.15D-8,917.19D-8,
+     *        3734.37D-8,916.44D-8,3721.94D-8,915.83D-8,3711.97D-8,
+     *        915.34D-8,3703.86D-8,914.93D-8,3697.15D-8,914.59D-8,
+     *        3691.56D-8/
+
+      DATA STARK/0.,0.,4.1384E-08,0.,2.9840E-08,2.8292E-03,2.1830E-08,
+     *     7.9635E-04,1.9649E-08,4.0003E-04,1.8176E-08,2.8896E-04,
+     *     1.7565E-08,2.3602E-04,1.7028E-08,2.0909E-04,1.6774E-08,
+     *     1.9171E-04,1.6520E-08,1.8087E-04,1.6392E-08,1.7290E-04,
+     *     1.6253E-08,1.6741E-04,1.6173E-08,1.6308E-04,1.6092E-08,
+     *     1.5988E-04,1.6042E-08,1.5718E-04,1.5989E-08,1.5519E-04,
+     *     1.5955E-08,1.5338E-04,1.5912E-08,1.5203E-04/
+
+      DATA ZMN/0.,0.,7913.6,0.,22232.,304.13,61825.,1484.7,81036.,
+     *     3879.9,139630.,5213.7,165380.,9089.8,245380.,10826.,277900.,
+     *     16100.,379190.,18244.,418570.,24884.,541080.,27443.,587390.,
+     *     35433.,731090.,38414.,784340.,47745.,949210.,51152.,1009440.,
+     *     61816.,1195450.,65652./
+  
+      DATA ALPHA0/.0,.0,.00104,.0,.00153,.03653,.00320,.05173,.00408, 
+     *     .08204,.00657,.10161,.00790,.14422,.01123,.17259,.01299,
+     *     .22739,.01717,.26407,.01935,.33123,.02438,.37601,.02698,
+     *     .45564,.03286,.50855,.03588,.60049,.04266,.66121,.04609,
+     *     .75932,.05367,.83450/
+
+C-----INITIALISATION
+      KAPPA_LAM = 0.
+
+C-----DETERMINATION OF THE LOWER PRINCIPAL QUANTUM-NUMBER : N = 1 - LYMAN
+C-----                                                      N = 2 - BALMER
+      NL = 1
+      istart = 0
+      IF ( W .GT. 3647.D-8 ) THEN
+        nl=2
+        istart = NSTART_ESW
+      ENDIF
+C-----COMPILATION OF THE LOWER MEMBERS OF THE LYMAN/BALMER-SERIES
+      DO 100 M = NL + istart, 18
+         DW = ABS(W - W0(NL,M))
+         IF ( DW .LE. 200.D-8 ) THEN
+            DW = DW * 1.D8
+            Z  = DW * ZMN(NL,M) * DIVTN
+            ZZ = Z + 1.
+            Y  = 1.5 + .5 * ( Z - 1. ) / ZZ
+            YY = Y ** .66667
+            G  = 1. - .66667 * Z / ( Y * ZZ * ZZ ) 
+            ALPHA = MAX(ALPHA0(NL,M),YY*DW/F0(N))
+            KAPPA_LAM = KAPPA_LAM + STARK(NL,M) * G / 
+     *                            ( YY * ALPHA ** 2.5 )
+         ENDIF
+ 100  CONTINUE
+      KAPPA_LAM = FH(N)/F0(N) * KAPPA_LAM
+C-----INCLUSION OF THE QUASI-CONTINUUM NEAR THE SERIES-EDGE W_EDGE(NL)
+      IF ( ( W.LT.(W_EDGE(NL)+43.D-8)) .AND. (W .GT. W_EDGE(NL))) THEN
+        kappa_lam = kappa_lam + GAUNT(NL) * (w**3) * 0.5    ! factor 0.5 introdiced by JKR
+     *        * atm.pion(n,1,1)*divtn/(KB*atm.uion(n,1,1))
+      ENDIF
+C-----FINAL LINE-ABSORPTION COEFFICIENT 
+      IF (NL .EQ. 2) 
+     *    KAPPA_LAM = KAPPA_LAM * EXP(-(H_E2_DIV_K * DIVTN))
+      RETURN
+      END
