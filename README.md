@@ -1,7 +1,7 @@
-oracle, the suppository of all knowledge
+**oracle, the suppository of all knowledge**
+============================================
 
-Getting Started
-===============
+**Getting Started**
 
 1. [This guide](https://help.github.com/articles/set-up-git) will step you through installing git,
    and will show you how to set up ``git`` with your GitHub credentials so that you can access 
@@ -15,13 +15,13 @@ Getting Started
 4. Now you can install ``oracle``:
 
    ````
-   git clone git@github.com:andycasey/oracle.git # This will create an 'oracle' directory in your cwd
+   # This will create an 'oracle' directory in your current working directory 
+   git clone git@github.com:andycasey/oracle.git 
    cd oracle
    sudo python setup.py install
    ````
 
-Updating Oracle
-===============
+**Updating ``oracle``**
 
 If there are changes to ``oracle`` you can update by doing:
 
