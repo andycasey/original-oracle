@@ -1,0 +1,20 @@
+model:
+  redshift: no
+  outliers: no
+  continuum: no 
+  tellurics: no
+  # By default will just include Fe unless 'elements' is specified. 
+
+continuum:
+  method: polynomial
+  order: [3, 3, 3, 3]
+
+#tellurics..?
+
+#balance:
+# atomic_lines:
+#  - [3933, 26.0]
+
+ 
+settings:
+  max_synth_threads: 32 # All the CPUs.
