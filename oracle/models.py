@@ -11,9 +11,12 @@ import numpy as np
 import os
 import scipy.optimize as op
 import scipy.stats as stats
-from scipy.ndimage import gaussian_filter1d
 import yaml
+
+from functools import partial
+from scipy.ndimage import gaussian_filter1d
 from time import time
+
 
 import emcee
 
@@ -24,7 +27,7 @@ import utils
 
 __all__ = ["Star", "StellarSpectrum", "GenerativeModel"]
 
-logger = logging.getLogger("unnamed")
+logger = logging.getLogger("oracle")
 logger.setLevel(logging.DEBUG)
 
 _eval_environment_ = { 
@@ -197,7 +200,7 @@ class AbsorptionProfile(object):
         ln_prior = 0
         for parameter, distribution in self._configuration.get("priors", {}).iteritems():
             f = eval(distribution, _eval_environment_)
-            ln_prior += f(value)
+            ln_prior += f(theta_dict[parameter])
         return ln_prior
         
 
@@ -758,7 +761,7 @@ class SpectralChannel(Model):
         ln_prior = 0
         for parameter, distribution in self._configuration.get("priors", {}).iteritems():
             f = eval(distribution, _eval_environment_)
-            ln_prior += f(value)
+            ln_prior += f(theta_dict[parameter])
         return ln_prior
 
     def _log_likelihood(self, theta, data):
@@ -1388,7 +1391,7 @@ class GenerativeModel(Model):
         # [TODO] Check for 1D/<3D> model atmospheres to determine free stellar
         #        parameters.
         config = self._configuration
-        parameters = ["Teff", "logg", "log_Fe", "xi"]
+        parameters = ["teff", "logg", "log_Fe", "xi"]
 
         # Any redshift parameters?
         if config["model"]["redshift"]:
@@ -1403,11 +1406,11 @@ class GenerativeModel(Model):
         # Any doppler broadening?
         if config["model"]["doppler_broadening"]:
             # [TODO] You idiot.
-            parameters.extend(["doppler_sigma_{0}".format(i) for i in range(3)])
+            parameters.extend(["doppler_sigma_{0}".format(i) for i in range(1)])
 
         # Any outlier parameters?
         if config["model"]["outliers"]:
-            parameters.extend(["Po", "Vo", "Yo_scale"])
+            parameters.extend(["Po", "Vo", "Ys"])
 
         # Any element parameters (other than Fe)?
         #if "elements" in config["model"]:
@@ -1440,14 +1443,14 @@ class GenerativeModel(Model):
 
         if not (1 > theta_dict.get("Po", 0.5) > 0) \
         or 0 > theta_dict.get("Vo", 1) \
-        or 0 > theta.get("xi", 1) \
-        or 0 > theta.get("Teff"):
+        or 0 > theta_dict.get("xi", 1) \
+        or 0 > theta_dict.get("teff"):
             return -np.inf
         
         ln_prior = 0
         for parameter, distribution in self._configuration.get("priors", {}).iteritems():
             f = eval(distribution, _eval_environment_)
-            ln_prior += f(value)
+            ln_prior += f(theta_dict[parameter])
         return ln_prior
 
 
@@ -1475,25 +1478,31 @@ class GenerativeModel(Model):
         """
 
         theta_dict = dict(zip(self.parameters, theta))
-        expected = self(dispersion=data.disp, **theta_dict)[:, 1]
+        expected = self(dispersions=[spectrum.disp for spectrum in data],
+            **theta_dict)
 
-        # Build an extra mask if only nearby points contribute to the model.
         z = theta_dict.get("z", 0.)
-        mask = self.mask(data.disp, z)
-        chi_sq = (data.flux - expected)**2 * data.ivariance * mask
+        likelihood = 0
+        for observed, model in zip(data, expected):
 
-        if not self.outliers:
-            likelihood = -0.5 * np.nansum(chi_sq)
+            mask = self.mask(observed.disp, z)
+            chi_sq = (observed.flux - model[:, 1])**2 * observed.ivariance * mask
 
-        else:
-            Po, Vo, Yo = [theta_dict.get(each) for each in ("Po", "Vo", "Yo_scale")]
-            model_likelihood = -0.5 * (chi_sq - np.log(data.ivariance))
-            outlier_ivariance = 1.0/(Vo + data.variance)
-            outlier_likelihood = -0.5 * ((data.flux - Yo)**2 \
-                * outlier_ivariance * mask - np.log(outlier_ivariance))
-            likelihood = np.nansum(np.logaddexp(
-                np.log(1. - Po) + model_likelihood,
-                np.log(Po)      + outlier_likelihood))
+            if "Po" not in theta_dict:
+                finite = np.isfinite(chi_sq)
+                likelihood += -0.5 * np.sum(chi_sq[finite])
+
+            else:
+                Po, Vo, Yo = [theta_dict.get(each) for each in ("Po", "Vo", "Ys")]
+                model_likelihood = -0.5 * (chi_sq - np.log(observed.ivariance))
+                outlier_ivariance = 1.0/(Vo + observed.variance)
+                outlier_likelihood = -0.5 * ((observed.flux - Yo)**2 \
+                    * outlier_ivariance * mask - np.log(outlier_ivariance))
+                mixture_likelihood = np.logaddexp(
+                    np.log(1. - Po) + model_likelihood,
+                    np.log(Po)      + outlier_likelihood)
+                finite = np.isfinite(mixture_likelihood)
+                likelihood += np.sum(mixture_likelihood[finite])
 
         return likelihood
 
@@ -1520,12 +1529,19 @@ class GenerativeModel(Model):
         :rtype:
             float
         """
-
+        
         log_prior = self._log_prior(theta)
         if not np.isfinite(log_prior):
             return log_prior
-        return log_prior + self._log_likelihood(theta, data)
-        
+        log_likelihood = self._log_likelihood(theta, data)
+        log_probability = log_prior + log_likelihood
+        logger.debug("Calculated logarithmic prior, likelihood, and probability"\
+            " for {0} to be {1:.3e}, {2:.3e}, and {3:.3e}".format(
+            ", ".join(["{0} = {1:.3f}".format(p, v) \
+                for p, v in zip(self.parameters, theta)]),
+            log_prior, log_likelihood, log_probability))
+        return log_probability
+
 
     def initial_guess(self, data, synth_kwargs=None):
         """
@@ -1594,17 +1610,17 @@ class GenerativeModel(Model):
         # Any explicit prior distributions set?
         if "priors" in self._configuration:
             for parameter, rule in self._configuration["priors"].iteritems():
-                if parameter in model.parameters \
+                if parameter in self.parameters \
                 and parameter not in parameter_guess:
                     parameter_guess[parameter] = eval(rule, environment)
 
         # Apply some default rules in case we haven't guessed these parameters
         # yet.
         default_rules = collections.OrderedDict([
-            ("Teff", np.random.uniform(3000, 7000)),
+            ("teff", np.random.uniform(3000, 7000)),
             ("logg", np.random.uniform(0, 5)),
             ("log_Fe", np.random.uniform(-2, 0)),
-            ("xi", "(1.28 + 3.3e-4 * (Teff - 6000) - 0.64 * (logg - 4.5)) "\
+            ("xi", "(1.28 + 3.3e-4 * (teff - 6000) - 0.64 * (logg - 4.5)) "\
                 "if logg > 3.5 else 2.70 - 0.509 * logg"),
             ("Po", np.random.uniform(0, 1)),
             ("Vo", abs(np.random.normal(0, 1))),
@@ -1627,6 +1643,20 @@ class GenerativeModel(Model):
         # [TODO] Set the abundances of all other elements to be zero:
         remaining_parameters = set(self.parameters).difference(parameter_guess.keys())
 
+        # OK, what about parameter stubs
+        default_rule_stubs = collections.OrderedDict([
+            ("doppler_sigma_", "uniform(0, 0.2)")
+        ])
+
+        for parameter in remaining_parameters:
+            for parameter_stub, rule in default_rule_stubs.iteritems():
+                if parameter.startswith(parameter_stub):
+                    local_environment = environment.copy()
+                    local_environment.update(parameter_guess)
+
+                    parameter_guess[parameter] = rule if isinstance(rule, (int, float)) \
+                        else eval(rule, local_environment)
+
         z_parameter = "z" if "z" in remaining_parameters else \
             ("z_{0}" if "z_0" in remaining_parameters else False)
         any_continuum = len(self._configuration["continuum"].get("order", [])) > 0 \
@@ -1648,7 +1678,7 @@ class GenerativeModel(Model):
                 if not synthesis_required: continue
 
                 model_spectrum = si.synthesise(
-                    parameter_guess["Teff"],
+                    parameter_guess["teff"],
                     parameter_guess["logg"],
                     parameter_guess["log_Fe"],
                     parameter_guess["xi"],
@@ -1685,11 +1715,13 @@ class GenerativeModel(Model):
                     for j, continuum_parameter in enumerate(continuum_parameters):
                         parameter_guess.setdefault("c_{0}_{1}".format(i, j), continuum_parameter)
 
+        # Make sure we haven't missed any parameters
+        assert len(set(self.parameters).difference(parameter_guess)) == 0
         return parameter_guess
 
 
-    def optimise(self, data, initial_theta=None, synth_kwargs=None, maxfun=10e4,
-        maxiter=10e4, xtol=100, ftol=0.1, full_output=False):
+    def optimise(self, data, initial_theta=None, synth_kwargs=None, maxfun=10e3,
+        maxiter=100, xtol=0.001, ftol=0.001, full_output=False):
         """
         Optimise the logarithmic probability of the model parameters theta given
         the data.
@@ -1773,9 +1805,12 @@ class GenerativeModel(Model):
         t_elapsed = time() - t_init
         logger.info("Optimisation took {0:.2f} seconds".format(t_elapsed))
 
+        op_theta_dict = dict(zip(self.parameters, op_theta))
+
+
         if full_output:
-            return (op_theta, op_fopt, op_niter, op_funcalls, op_warnflag)
-        return op_theta
+            return (op_theta_dict, op_fopt, op_niter, op_funcalls, op_warnflag)
+        return op_theta_dict
 
 
     def __call__(self, dispersions, synth_kwargs=None, **theta):
@@ -1837,7 +1872,7 @@ class GenerativeModel(Model):
     
         # Synthesise the model spectra first (in parallel where applicable) and
         # then apply the cheap transformations in serial.
-        model_spectra = si.synthesise(theta["Teff"], theta["logg"], theta["log_Fe"],
+        model_spectra = si.synthesise(theta["teff"], theta["logg"], theta["log_Fe"],
             theta["xi"], synthesis_ranges, threads=threads, **synth_kwargs)
 
         continuum_spectra = []
@@ -1850,7 +1885,7 @@ class GenerativeModel(Model):
             # [TODO] For the moment we only have instrumental broadening.
             kernel = theta.get("doppler_sigma_{0}".format(i), 0.)
             if kernel > 0:
-                pixel_kernel = (sigma/(2 * (2*np.log(2))**0.5))/np.mean(np.diff(model_spectrum[:, 0]))
+                pixel_kernel = (kernel/(2 * (2*np.log(2))**0.5))/np.mean(np.diff(model_spectrum[:, 0]))
                 model_spectrum[:, 1] = gaussian_filter1d(model_spectrum[:, 1],
                     pixel_kernel)
 
@@ -1863,10 +1898,10 @@ class GenerativeModel(Model):
             # continuum spectra (if it is returned with return_continuum)
             # will always be on the same dispersion map as the returned
             # spectra.
-            if data is not None:
-                expected = np.interp(data[i].disp, model_spectrum[:, 0],
+            if len(dispersions[i]) > 2:
+                expected = np.interp(dispersions[i], model_spectrum[:, 0],
                     model_spectrum[:, 1], left=np.nan, right=np.nan)
-                model_spectrum = np.vstack([data[i].disp, expected]).T
+                model_spectrum = np.vstack([dispersions[i], expected]).T
 
             # Apply continuum transformation to the model spectra.
             j, coefficients = 0, []

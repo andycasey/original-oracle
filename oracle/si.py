@@ -18,7 +18,8 @@ from textwrap import dedent
 
 from utils import atomic_number
 
-logger = logging.getLogger("unnamed")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("si")
 
 class SIException(BaseException):
     pass
@@ -656,7 +657,7 @@ def synthesise(teff, logg, metallicity, xi, wavelengths,
         with instance() as si:
             for wavelength_range, wavelength_step in zip(wavelengths, wavelength_steps):
                 spectra.append(si.synthesise(teff, logg, metallicity, xi,
-                    wavelength_range, wavelength_step, abundances, full_output))
+                    wavelength_range, wavelength_step, abundances, True))
     else:
         # Thread dat shit.
         if chunk:
@@ -679,17 +680,13 @@ def synthesise(teff, logg, metallicity, xi, wavelengths,
         for wavelength_range, wavelength_step in zip(wavelengths, wavelength_steps):
             results.append(pool.apply_async(_synthesise_wrapper, args=(teff, logg,
                 metallicity, xi, wavelength_range, wavelength_step, abundances,
-                full_output)))
+                True)))
 
         # Join the chunks back together. 
         chunked_spectrum = []
         for i, result in enumerate(results):
-            if full_output:
-                spectrum, stdout = result.get()
-                stdouts.append(stdout)
-
-            else:
-                spectrum = result.get()
+            spectrum, stdout = result.get()
+            stdouts.append(stdout)
 
             if len(spectrum) == 0:
                 raise SIException("no fluxes found in spectrum chunk")

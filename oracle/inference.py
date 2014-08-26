@@ -16,8 +16,8 @@ from glob import glob
 import utils
 
 # Initialise logger
-logger = logging.getLogger("unnamed")
-logger.setLevel(logging.INFO)
+logger = logging.getLogger("oracle")
+logger.setLevel(logging.DEBUG)
 
 # Specify a prior environment so that we can evaluate distributions on-the-fly.
 prior_environment = dict(zip(["locals", "globals", "__name__", "__file__",
