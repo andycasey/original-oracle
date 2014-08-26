@@ -54,9 +54,9 @@ def comparison(observed_spectra, model, theta, figsize=None,
     in zip(axes, observed_spectra, model_spectra):
 
         # Plot the spectra
-        ax.plot(observed_spectrum.disp, observed_spectrum.flux, observed_color)
         ax.plot(model_spectrum[:, 0], model_spectrum[:, 1], model_color)
-
+        ax.plot(observed_spectrum.disp, observed_spectrum.flux, observed_color)
+        
         # Show the mask
         obs_start, obs_end = observed_spectrum.disp[0], observed_spectrum.disp[-1]
         for start, end in mask:

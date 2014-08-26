@@ -4,18 +4,47 @@
 
 __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 
-__all__ = ["atomic_number", "gaussian", "voigt", "CachedProperty"]
+__all__ = ["atomic_number", "gaussian", "voigt"]
 
 import numpy as np
 from scipy.special import wofz
 
 
 def gaussian(mu, sigma, x):
+    """
+    Evaluates a Gaussian profile with ``mu`` and ``sigma`` at all values of ``x``.
+
+    :param mu:
+        The profile mean.
+
+    :type mu:
+        float
+
+    :param sigma:
+        The standard deviation of the profile.
+
+    :type sigma:
+        float
+
+    :param x:
+        The values to calculate the Gaussian profile at.
+
+    :type x:
+        :class:`numpy.array`
+
+    :returns:
+        An array with values for the calculated absorption profile.
+
+    :rtype:
+        :class:`numpy.array`
+    """
+
     return np.exp(-(x - mu)**2 / (2*sigma**2))
 
 
 def voigt(mu, fwhm, amplitude, shape, x):
-    """Evaluates a Voigt absorption profile across the `x`
+    """
+    Evaluates a Voigt absorption profile across the `x`
     values with a given local continuum.
 
     V(x,sig,gam) = Re(w(z))/(sig*sqrt(2*pi))
@@ -51,7 +80,14 @@ def atomic_number(element):
     :param element:
         The short-hand notation for the element (e.g., Fe).
 
-    :type element: str
+    :type element:
+        str
+
+    :returns:
+        The atomic number for a given element.
+
+    :rtype:
+        int
     """
     
     if not isinstance(element, (unicode, str)):

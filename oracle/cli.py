@@ -9,17 +9,11 @@ __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 # Necessary for all sub-parsers
 import argparse
 import logging
-
-# Necessary for some sub-parsers
-import cPickle as pickle
-import json
-import multiprocessing
 import os
-import yaml
 from time import time
 
 import numpy as np
-import pyfits
+import matplotlib.pyplot as plt
 
 import plot
 import models
@@ -59,14 +53,12 @@ def solve(args):
     # real work
     _check_for_existing_files(args)
 
+    # Create the model and load the spectra.
     model = models.GenerativeModel(args.config_filename)
-    logger.info("Model parameters: {0}".format(", ".join(model.parameters)))
-
-    # Load the spectra.
     spectra = map(specutils.Spectrum.load, args.spectra_filenames)
-
+  
     # Make some initial guess of the model parameters.
-    initial_guess = model.initial_guess(spectra)
+    initial_guess = model.initial_guess(spectra)   
     logger.info("Initial guess for model parameters:")
     for parameter, value in initial_guess.iteritems():
         logger.info("\t{0}: {1:.2f}".format(parameter, value))
@@ -77,11 +69,12 @@ def solve(args):
             "{0}-initial.{1}".format(args.output_prefix, args.plot_fmt)))
         fig = plot.comparison(spectra, model, initial_guess)
         fig.savefig(path)
+        plt.close(fig)
+
         logger.info("Saved model spectrum of initial theta to {0}".format(path))
-        plt.close("all")
-   
+        
     # Perform the optimisation from the initial guess point.
-    optimised_theta = star.optimise(spectra, initial_guess)
+    optimised_theta = model.optimise(spectra, initial_guess)
 
     # Plot a projection showing the optimised theta
     if args.plotting:
@@ -89,13 +82,17 @@ def solve(args):
             "{0}-optimal.{1}".format(args.output_prefix, args.plot_fmt)))
         fig = plot.comparison(spectra, model, optimised_theta)
         fig.savefig(path)
-        logger.info("Saved model spectrum of optimal theta to {0}".format(path))
-        plt.close("all")
+        plt.close(fig)
 
+        logger.info("Saved model spectrum of optimal theta to {0}".format(path))
+    
     # Plot the model parameter values against clock time?
 
     # Inference!
-    
+    posterior, sampler, info = model.infer(spectra, optimised_theta)
+
+    raise a
+
     # 
 
 

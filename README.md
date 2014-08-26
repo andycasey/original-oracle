@@ -39,6 +39,16 @@ python setup.py install --user
 sudo python setup.py install
 ````
 
+**Usage**
+This will change wildly while it's in development. Check the tests in ``oracle/tests/`` to get an idea of how to run things.
+
+Currently you **can** do:
+
+````
+oracle solve generative <configuration.yaml> <spectrum_blue.fits> [, spectrum_red.fits]
+````
+
+But this will be slow because there is no fancy pre-optimisation prior to the MCMC sampling.
 
 
 **Contributing to ``oracle``**
