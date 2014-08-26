@@ -25,7 +25,8 @@ class SIException(BaseException):
 
 class instance(object):
     
-    _executable = "~/codes/siu/lineform.out"
+    # It is assumed that the setup.py installer has placed si_lineform on your $PATH
+    _executable = "si_lineform"
     _acceptable_return_codes = (0, )
 
     def __init__(self, twd_base_dir="/tmp", prefix="si", chars=10, debug=False):
