@@ -288,6 +288,10 @@ class instance(object):
                 usecols=(4, )).flatten()[0]
 
         except IOError:
+            logger.warn("No equivalent width found in {0}:".format(
+                os.path.join(self.twd, "fort.16")))
+            logger.warn("SI output (code {0}):\n{1}\n{2}".format(
+                returncode, stdout, stderr))
             raise SIException("no equivalent width found in {0}".format(
                 os.path.join(self.twd, "fort.16")))
 
@@ -297,10 +301,18 @@ class instance(object):
                 synthetic_spectra = np.loadtxt(os.path.join(self.twd, "fort.14"))
 
             except IOError:
+                logger.warn("No synthetic spectra found in {0}:".format(
+                    os.path.join(self.twd, "fort.14")))
+                logger.warn("SI output (code {0}):\n{1}\n{2}".format(
+                    returncode, stdout, stderr))
                 raise SIException("no synthetic spectra found in {0}".format(
                     os.path.join(self.twd, "fort.14")))
 
             if len(synthetic_spectra) == 0:
+                logger.warn("No synthetic spectra found in {0}:".format(
+                    os.path.join(self.twd, "fort.14")))
+                logger.warn("SI output (code {0}):\n{1}\n{2}".format(
+                    returncode, stdout, stderr))
                 raise SIException("no synthetic spectra found in {0}".format(
                     os.path.join(self.twd, "fort.14")))
 
@@ -412,10 +424,18 @@ class instance(object):
             spectrum = np.loadtxt(os.path.join(self.twd, "fort.14"))
 
         except IOError:
+            logger.warn("No synthetic spectra found in {0}:".format(
+                os.path.join(self.twd, "fort.14")))
+            logger.warn("SI output (code {0}):\n{1}\n{2}".format(
+                returncode, stdout, stderr))
             raise SIException("no fluxes synthesised by SI in {0}".format(
                 os.path.join(self.twd, "fort.14")))
 
         if len(spectrum) == 0:
+            logger.warn("No synthetic spectra found in {0}:".format(
+                os.path.join(self.twd, "fort.14")))
+            logger.warn("SI output (code {0}):\n{1}\n{2}".format(
+                returncode, stdout, stderr))
             raise SIException("no synthetic spectra found in {0}".format(
                     os.path.join(self.twd, "fort.14")))
 
@@ -426,7 +446,8 @@ class instance(object):
 
     def __exit__(self, exit_type, value, traceback):
         # Remove the temporary working directory and any files in it.
-        if exit_type not in (IOError, SIException) and not self.debug:
+        #if exit_type not in (IOError, SIException) and not self.debug:
+        if not self.debug:
             shutil.rmtree(self.twd)
         else:
             logger.info("Temporary directory {0} has been kept to allow debugging"
