@@ -18,7 +18,9 @@
    # This will create an 'oracle' directory in your current working directory 
    git clone git@github.com:andycasey/oracle.git 
    cd oracle
-   sudo python setup.py install
+   python setup.py install --user
+   # OR if you have sudo access:
+   sudo python setup.py install 
    ````
 
 **Updating ``oracle``**
@@ -30,7 +32,9 @@ cd /wherever/oracle/is/kept
 # The following line will download the changes from this GitHub repository
 git pull
 # Now we will install the latest version so that it's available anywhere on the system 
-sudo python setup.py install 
+python setup.py install --user
+# OR if you have sudo access:
+sudo python setup.py install
 ````
 
 Any problems? [Open an issue](http://github.com/andycasey/oracle/issues/new).
