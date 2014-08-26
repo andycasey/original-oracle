@@ -1769,6 +1769,11 @@ class GenerativeModel(Model):
         or 0 > theta_dict.get("xi", 1) \
         or 0 > theta_dict.get("teff"):
             return -np.inf
+
+        # Put in priors for channel stubs
+        for i in range(self._num_observed_channels):
+            if 0 > theta_dict.get("doppler_sigma_{0}".format(i), 1):
+                return -np.inf
         
         ln_prior = 0
         for parameter, distribution in self._configuration.get("priors", {}).iteritems():
