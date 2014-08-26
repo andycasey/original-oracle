@@ -74,10 +74,13 @@ class instance(object):
             self.twd = os.path.join(self.twd_base_dir, self.prefix \
                 + "".join([choice(ascii_letters) for _ in xrange(self.chars)]))
         os.mkdir(self.twd)
+        logging.debug("Temporary working directory: {0}".format(self.twd))
 
-        # Link the required line data.
-        os.symlink("/home/arc/codes/siu/linedata/master_line.dat",
-            os.path.join(self.twd, "linedata.dat"))
+        # Link the line list.
+        siu_line_list = os.path.abspath(os.path.join(os.path.dirname(os.path.expanduser(__file__)), 
+            "../si/linedata/master_line.dat")) 
+        os.symlink(siu_line_list, os.path.join(self.twd, "linedata.dat"))
+
         return self
 
 
@@ -116,24 +119,15 @@ class instance(object):
             raise Alarm
 
         default_env = {
-            "PATH": os.path.dirname(self._executable),
-
-            "DATA_HOME": "/home/arc/codes",
-            "SIU_MAIN": "/home/arc/codes/siu",
-
-            "EXACT_ATM": "/data/arc/archive/atmos/special",
-            "ATM_GRID": "/data/arc/archive/atmos/grid",
-            "LINEDATA": "/home/arc/codes/siu/linedata",  
-            "LF_INPATH": "/home/arc/codes/siu/data",   
-
-            "LF_OUTPATH": "/home/arc/codes/siu/out",           
-            "LF_CODE": "/home/arc/codes/siu/code",        
-            "LOG_MSG": "/home/arc/codes/siu/lineform.log"   
+            "PATH": os.getenv("PATH"),
+            # We will make this relative to __file__ until we can remove
+            # all instances of SIU_MAIN in the fortran code itself.
+            "SIU_MAIN": os.path.abspath(os.path.join(os.path.dirname(os.path.expanduser(__file__)), "../si")) 
         }
         if env is not None:
             default_env.update(env)
 
-        p = Popen([os.path.abspath(os.path.expanduser(self._executable))],
+        p = Popen([self._executable],
             shell=shell, bufsize=2056, cwd=self.twd, stdin=PIPE, stdout=PIPE,
             stderr=PIPE, env=default_env, close_fds=True)
 
@@ -422,13 +416,12 @@ class instance(object):
 
 
     def __exit__(self, exit_type, value, traceback):
-        print(self.twd)
         # Remove the temporary working directory and any files in it.
-        #if exit_type not in (IOError, SIException) and not self.debug:
-        #    shutil.rmtree(self.twd)
-        #else:
-        #    logger.info("Temporary directory {0} has been kept to allow debugging"
-        #        .format(self.twd))
+        if exit_type not in (IOError, SIException) and not self.debug:
+            shutil.rmtree(self.twd)
+        else:
+            logger.info("Temporary directory {0} has been kept to allow debugging"
+                .format(self.twd))
         return False
 
 

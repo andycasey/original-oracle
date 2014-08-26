@@ -1,11 +1,11 @@
 SHELL   = /bin/sh
 
 # define detail root directory
-EXEDIR = ..
-BASEDIR = $(EXEDIR)/code
+#EXEDIR = $(shell pwd)/..
+BASEDIR = $(shell pwd)
 MAKEDIR = $(BASEDIR)
 CODEDIR = $(BASEDIR)
-EXEFILE = si_lineform
+EXEFILE = $(shell pwd)/../si_lineform
 
 PREOBJCS= 
 
@@ -22,7 +22,7 @@ C_FILES = $(wildcard *.c)
 FOBJCS  = $(patsubst %.f,%.o,$(F_FILES)) 
 COBJCS  = $(patsubst %.c,%.o,$(C_FILES)) 
 
-$(EXEDIR)/$(EXEFILE): $(FOBJCS) $(COBJCS) $(PREOBJCS)
+$(EXEFILE): $(FOBJCS) $(COBJCS) $(PREOBJCS)
 	$(LD) $@ $(COBJCS) $(FOBJCS) \
 	      $(PREOBJCS) 
 
