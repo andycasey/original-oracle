@@ -7,20 +7,18 @@ __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 import collections
 import logging
 import multiprocessing as mp
-import numpy as np
 import os
-import scipy.optimize as op
-import scipy.stats as stats
+import warnings
 import yaml
-
 from functools import partial
-from scipy.ndimage import gaussian_filter1d
 from time import time
 
+import numpy as np
+from scipy import optimize as op, stats
 
+from scipy.ndimage import gaussian_filter1d
 import emcee
 
-import inference
 import si
 import specutils
 import utils
@@ -28,14 +26,16 @@ import utils
 __all__ = ["Star", "StellarSpectrum", "GenerativeModel"]
 
 logger = logging.getLogger("oracle")
-logger.setLevel(logging.DEBUG)
 
-_eval_environment_ = { 
-    "locals": None, "globals": None, "__name__": None, "__file__": None, "__builtins__": None,
+_log_prior_eval_environment = { 
+    "locals": None,
+    "globals": None,
+    "__name__": None,
+    "__file__": None,
+    "__builtins__": None,
     "uniform": lambda a, b: partial(stats.uniform.logpdf, **{"loc": a, "scale": b - a}),
     "normal": lambda a, b: partial(stats.norm.logpdf, **{"loc": a, "scale": b})
 }
-
 
 class AbsorptionProfile(object):
 
@@ -199,7 +199,7 @@ class AbsorptionProfile(object):
 
         ln_prior = 0
         for parameter, distribution in self._configuration.get("priors", {}).iteritems():
-            f = eval(distribution, _eval_environment_)
+            f = eval(distribution, _log_prior_eval_environment)
             ln_prior += f(theta_dict[parameter])
         return ln_prior
         
@@ -760,7 +760,7 @@ class SpectralChannel(Model):
         
         ln_prior = 0
         for parameter, distribution in self._configuration.get("priors", {}).iteritems():
-            f = eval(distribution, _eval_environment_)
+            f = eval(distribution, _log_prior_eval_environment)
             ln_prior += f(theta_dict[parameter])
         return ln_prior
 
@@ -1068,7 +1068,7 @@ class SpectralChannel(Model):
         return op_theta        
 
 
-    def infer(self, data, opt_theta, walkers=200, burn_in=200, sample=100,
+    def infer(self, data, opt_theta, walkers=200, burn=200, sample=100, threads=1,
         **kwargs):
         """
         Infer the model parameters given the data.
@@ -1085,10 +1085,10 @@ class SpectralChannel(Model):
         :type walkers:
             int
 
-        :param burn_in:
+        :param burn:
             The number of MCMC steps to discard as burn-in.
 
-        :type burn_in:
+        :type burn:
             int
 
         :param sample:
@@ -1096,6 +1096,16 @@ class SpectralChannel(Model):
         
         :type sample:
             int
+
+        :param threads: [optional]
+            The number of threads to use for the :class:`emcee.EnsembleSampler`.
+            Specifying -1 will set ``threads`` to the number of available CPUs.
+
+        :type threads:
+            int
+
+        :param kwargs: [optional]
+            Keyword arguments to supply directly to :class:`emcee.EnsembleSampler`
 
         :returns:
             The posterior quantiles in all parameters, the model sampler, 
@@ -1105,18 +1115,14 @@ class SpectralChannel(Model):
 
         #stds = [std.get(parameter, 1e-8) for parameter in self.parameters]
         p0 = [opt_theta + 1e-4*np.random.randn(len(self.parameters)) for i in range(walkers)]
-        sampler_kwargs = {
-            "threads": self._configuration["settings"].get("max_sampler_threads", 1) \
-                if "settings" in self._configuration else 1
-        }
-        sampler_kwargs.update(kwargs)
+        
         sampler = emcee.EnsembleSampler(walkers, len(self.parameters),
-            _inferencer, args=(self, data, ), **sampler_kwargs)
+            _inferencer, args=(self, data), threads=threads, **kwargs)
 
-        mean_acceptance_fractions = np.zeros((burn_in + sample))
+        mean_acceptance_fractions = np.zeros((burn + sample))
 
         for i, (pos, lnprob, rstate) in enumerate(sampler.sample(p0, \
-            iterations=burn_in)):
+            iterations=burn)):
             mean_acceptance_fractions[i] = np.mean(sampler.acceptance_fraction)
             print("Sampler has finished step {0:.0f} of burn-in with "\
                 "<a_f> = {1:.3f}, maximum log probability in last step was "\
@@ -1381,6 +1387,7 @@ class GenerativeModel(Model):
         :type configuration: str
         """
         super(GenerativeModel, self).__init__(configuration)
+        self._num_observed_channels = -1
         return None
 
 
@@ -1388,10 +1395,19 @@ class GenerativeModel(Model):
     def parameters(self):
         """ Return the model parameters. """
 
+        config = self._configuration
+        any_channel_parameters = (config["model"]["continuum"] \
+            or config["model"]["doppler_broadening"])
+        if any_channel_parameters and 0 >= self._num_observed_channels:
+            raise ValueError("Cannot determine total number of model parameters"\
+                " until the model has been supplied some data. We have to give "\
+                "model parameters to each observed channel, but we don't know " \
+                "how many observed channels there are yet.")
+            # [TODO] This is a complicated thing. Perhaps link to online doc page
+        
         # [TODO] Check for 1D/<3D> model atmospheres to determine free stellar
         #        parameters.
-        config = self._configuration
-        parameters = ["teff", "logg", "log_Fe", "xi"]
+        parameters = ["teff", "logg", "[M/H]", "xi"]
 
         # Any redshift parameters?
         if config["model"]["redshift"]:
@@ -1400,147 +1416,154 @@ class GenerativeModel(Model):
 
         # Any continuum parameters?
         if config["model"]["continuum"]:
+            # Don't create unnecessary parameters. Only create parameters for
+            # channels that are defined *and* have data.
+            num_channels_with_continuum = min([
+                len(config["continuum"]["order"]),
+                self._num_observed_channels
+            ])
+
             for i, each in enumerate(config["continuum"]["order"]):
-                parameters.extend(["c_{0}_{1}".format(i, j) for j in range(each)])
+                parameters.extend(["c_{0}_{1}".format(i, j) \
+                    for j in range(num_channels_with_continuum)])
 
         # Any doppler broadening?
         if config["model"]["doppler_broadening"]:
             # [TODO] You idiot.
-            parameters.extend(["doppler_sigma_{0}".format(i) for i in range(1)])
+            parameters.extend(["doppler_sigma_{0}".format(i) \
+                for i in range(self._num_observed_channels)])
 
         # Any outlier parameters?
         if config["model"]["outliers"]:
             parameters.extend(["Po", "Vo", "Ys"])
 
+        # [TODO] Abundance parameters.
         # Any element parameters (other than Fe)?
         #if "elements" in config["model"]:
         #    parameters.extend(["log_{0}".format(each) \
         #        for each in set(config["model"]["elements"]).difference("Fe")])
 
         # [TODO] Any telluric parameters?
-
+        
         return parameters
 
 
-    def _log_prior(self, theta):
+    def __call__(self, dispersions, synth_kwargs=None, **theta):
         """
-        Return the logarithmic prior probability of the parameters ``theta``.
+        Generate data for the given :math:`\\theta`.
 
-        :param theta:
-            The values of the ``model.parameters``.
+        :param dispersions:
+            A list of two-length tuples containing the range of wavelengths to
+            synthesise.
+
+        :type dispersions:
+            list 
+
+        :param synth_kwargs: [optional]
+            Keyword arguments to pass directly to :func:`si.synthesise`.
+
+        :type synth_kwargs:
+            dict
+
+        :keyword theta:
+            A dictionary mapping of the model parameters (keys) and values.
 
         :type theta:
-            list-type
+            dict
+
+        :raises KeyError:
+            If a model parameter is missing from ``**theta.``
 
         :returns:
-            The logarithmic prior probability given the parameters ``theta``.
+            A list of two-column arrays that represent dispersion and flux for
+            each observed channel in ``data``, or each specified region in
+            ``wavelength_ranges``. 
 
         :rtype:
-            float
+            list
         """
-
-        theta_dict = dict(zip(self.parameters, theta))
-
-        if not (1 > theta_dict.get("Po", 0.5) > 0) \
-        or 0 > theta_dict.get("Vo", 1) \
-        or 0 > theta_dict.get("xi", 1) \
-        or 0 > theta_dict.get("teff"):
-            return -np.inf
         
-        ln_prior = 0
-        for parameter, distribution in self._configuration.get("priors", {}).iteritems():
-            f = eval(distribution, _eval_environment_)
-            ln_prior += f(theta_dict[parameter])
-        return ln_prior
+        # [TODO] Redshift the *requested* synthesis range based on z in theta?
+        missing_parameters = set(self.parameters).difference(theta)
+        if len(missing_parameters) > 0:
+            logging.warn("Generate call is missing some theta parameters: {0}".format(
+                ", ".join(missing_parameters)))
 
+        if synth_kwargs is None:
+            synth_kwargs = {}
 
-    def _log_likelihood(self, theta, data):
-        """
-        Return the logarithmic likelihood of the parameters ``theta``.
+        synth_kwargs["full_output"] = False
 
-        :param theta:
-            The values of the ``model.parameters``.
+        # Request the wavelength step to be ~twice the observed pixel sampling.
+        #if data is not None:
+        #    synth_kwargs.setdefault("wavelength_steps",
+        #        [(0., np.min(np.diff(each.disp))/2., 0.) for each in data])
+            
+        synthesis_ranges = [(each[0], each[-1]) for each in dispersions]
+    
+        # Synthesise the model spectra first (in parallel where applicable) and
+        # then apply the cheap transformations in serial.
+        model_spectra = si.synthesise(theta["teff"], theta["logg"], theta["[M/H]"],
+            theta["xi"], synthesis_ranges, **synth_kwargs)
 
-        :type theta:
-            list-type
+        continuum_spectra = []
+        for i in range(len(model_spectra)):
 
-        :param data:
-            The observed data.
+            model_spectrum = model_spectra[i]
+            
+            # Apply macroturbulent, vsini and instrumental broadening to the
+            # spectrum.
+            # [TODO] For the moment we only have instrumental broadening.
+            kernel = theta.get("doppler_sigma_{0}".format(i), 0.)
+            if kernel > 0:
+                pixel_kernel = (kernel/(2 * (2*np.log(2))**0.5))/np.mean(np.diff(model_spectrum[:, 0]))
+                model_spectrum[:, 1] = gaussian_filter1d(model_spectrum[:, 1],
+                    pixel_kernel)
 
-        :type data:
-            :class:`specutils.Spectrum1D`
+            # Apply redshift corrections to the model spectra.
+            z = theta["z"] if "z" in theta else theta.get("z_{0}".format(i), 0)
+            model_spectrum[:, 0] *= (1. + z)
 
-        :returns:
-            The logarithmic likelihood of the parameters ``theta``.
+            # Interpolate the new model spectra onto the observed pixels.
+            # We do this before transforming the continuum such that the
+            # continuum spectra (if it is returned with return_continuum)
+            # will always be on the same dispersion map as the returned
+            # spectra.
+            if len(dispersions[i]) > 2:
+                model_spacing = np.diff(model_spectrum[:, 0])
+                mean_dispersion_spacing = np.mean(np.diff(dispersions[i]))
+                percentile = 100. - stats.percentileofscore(model_spacing,
+                    mean_dispersion_spacing)
 
-        :rtype:
-            float
-        """
+                if percentile > 25.:
+                    warnings.warn("More than {0:.0f}% of the synthesised pixels"\
+                        " are sampled at larger intervals than the observed "\
+                        "spectrum.")
 
-        theta_dict = dict(zip(self.parameters, theta))
-        expected = self(dispersions=[spectrum.disp for spectrum in data],
-            **theta_dict)
+                expected = np.interp(dispersions[i], model_spectrum[:, 0],
+                    model_spectrum[:, 1], left=np.nan, right=np.nan)
+                model_spectrum = np.vstack([dispersions[i], expected]).T
 
-        z = theta_dict.get("z", 0.)
-        likelihood = 0
-        for observed, model in zip(data, expected):
+            # Apply continuum transformation to the model spectra.
+            j, coefficients = 0, []
+            while "c_{0}_{1}".format(i, j) in theta:
+                coefficients.append(theta["c_{0}_{1}".format(i, j)])
+                j += 1
 
-            mask = self.mask(observed.disp, z)
-            chi_sq = (observed.flux - model[:, 1])**2 * observed.ivariance * mask
-
-            if "Po" not in theta_dict:
-                finite = np.isfinite(chi_sq)
-                likelihood += -0.5 * np.sum(chi_sq[finite])
+            if len(coefficients) > 0:
+                continuum_spectra.append(np.polyval(coefficients, model_spectrum[:, 0]))
+                model_spectrum[:, 1] *= continuum_spectra[-1]
 
             else:
-                Po, Vo, Yo = [theta_dict.get(each) for each in ("Po", "Vo", "Ys")]
-                model_likelihood = -0.5 * (chi_sq - np.log(observed.ivariance))
-                outlier_ivariance = 1.0/(Vo + observed.variance)
-                outlier_likelihood = -0.5 * ((observed.flux - Yo)**2 \
-                    * outlier_ivariance * mask - np.log(outlier_ivariance))
-                mixture_likelihood = np.logaddexp(
-                    np.log(1. - Po) + model_likelihood,
-                    np.log(Po)      + outlier_likelihood)
-                finite = np.isfinite(mixture_likelihood)
-                likelihood += np.sum(mixture_likelihood[finite])
+                # No continuum for this order. Fill it with a None to maintain
+                # order.
+                continuum_spectra.append(None)
 
-        return likelihood
+            model_spectra[i] = model_spectrum
 
-
-    def _log_probability(self, theta, data):
-        """
-        Return the logarithmic probability of the model parameters ``theta``.
-
-        :param theta:
-            The values of the ``model.parameters``.
-
-        :type theta:
-            list-type
-
-        :param data:
-            The observed data.
-
-        :type data:
-            :class:`specutils.Spectrum1D`
-
-        :returns:
-            The logarithmic probability of the parameters ``theta``.
-
-        :rtype:
-            float
-        """
-        
-        log_prior = self._log_prior(theta)
-        if not np.isfinite(log_prior):
-            return log_prior
-        log_likelihood = self._log_likelihood(theta, data)
-        log_probability = log_prior + log_likelihood
-        logger.debug("Calculated logarithmic prior, likelihood, and probability"\
-            " for {0} to be {1:.3e}, {2:.3e}, and {3:.3e}".format(
-            ", ".join(["{0} = {1:.3f}".format(p, v) \
-                for p, v in zip(self.parameters, theta)]),
-            log_prior, log_likelihood, log_probability))
-        return log_probability
+        #if return_continuum:
+        #    return (model_spectra, continuum_spectra)
+        return model_spectra
 
 
     def initial_guess(self, data, synth_kwargs=None):
@@ -1581,6 +1604,8 @@ class GenerativeModel(Model):
             "uniform": np.random.uniform
         })
 
+        self._num_observed_channels = len(data)
+
         # Any explicit initial guess information?
         if "initial_guess" in self._configuration:
 
@@ -1619,7 +1644,7 @@ class GenerativeModel(Model):
         default_rules = collections.OrderedDict([
             ("teff", np.random.uniform(3000, 7000)),
             ("logg", np.random.uniform(0, 5)),
-            ("log_Fe", np.random.uniform(-2, 0)),
+            ("[M/H]", np.random.uniform(-2, 0)),
             ("xi", "(1.28 + 3.3e-4 * (teff - 6000) - 0.64 * (logg - 4.5)) "\
                 "if logg > 3.5 else 2.70 - 0.509 * logg"),
             ("Po", np.random.uniform(0, 1)),
@@ -1680,7 +1705,7 @@ class GenerativeModel(Model):
                 model_spectrum = si.synthesise(
                     parameter_guess["teff"],
                     parameter_guess["logg"],
-                    parameter_guess["log_Fe"],
+                    parameter_guess["[M/H]"],
                     parameter_guess["xi"],
                     (observed_spectrum.disp[0], observed_spectrum.disp[-1]),
                     **synth_kwargs)
@@ -1720,8 +1745,141 @@ class GenerativeModel(Model):
         return parameter_guess
 
 
-    def optimise(self, data, initial_theta=None, synth_kwargs=None, maxfun=10e2,
-        maxiter=10e2, xtol=0.001, ftol=0.001, full_output=False):
+    def _log_prior(self, theta):
+        """
+        Return the logarithmic prior probability of the parameters ``theta``.
+
+        :param theta:
+            The values of the ``model.parameters``.
+
+        :type theta:
+            list-type
+
+        :returns:
+            The logarithmic prior probability given the parameters ``theta``.
+
+        :rtype:
+            float
+        """
+
+        theta_dict = dict(zip(self.parameters, theta))
+
+        if not (1 > theta_dict.get("Po", 0.5) > 0) \
+        or 0 > theta_dict.get("Vo", 1) \
+        or 0 > theta_dict.get("xi", 1) \
+        or 0 > theta_dict.get("teff"):
+            return -np.inf
+        
+        ln_prior = 0
+        for parameter, distribution in self._configuration.get("priors", {}).iteritems():
+            f = eval(distribution, _log_prior_eval_environment)
+            ln_prior += f(theta_dict[parameter])
+        return ln_prior
+
+
+    def _log_likelihood(self, theta, data, synth_kwargs):
+        """
+        Return the logarithmic likelihood of the parameters ``theta``.
+
+        :param theta:
+            The values of the ``model.parameters``.
+
+        :type theta:
+            list-type
+
+        :param data:
+            The observed data.
+
+        :type data:
+            :class:`specutils.Spectrum1D`
+
+        :param synth_kwargs: [optional]
+            Keyword arguments to pass directly to :func:`si.synthesise`.
+
+        :type synth_kwargs:
+            dict
+
+        :returns:
+            The logarithmic likelihood of the parameters ``theta``.
+
+        :rtype:
+            float
+        """
+
+        theta_dict = dict(zip(self.parameters, theta))
+        expected = self(dispersions=[spectrum.disp for spectrum in data],
+            synth_kwargs=synth_kwargs, **theta_dict)
+
+        z = theta_dict.get("z", 0.)
+        likelihood = 0
+        for observed, model in zip(data, expected):
+
+            mask = self.mask(observed.disp, z)
+            chi_sq = (observed.flux - model[:, 1])**2 * observed.ivariance * mask
+
+            if "Po" not in theta_dict:
+                finite = np.isfinite(chi_sq)
+                likelihood += -0.5 * np.sum(chi_sq[finite])
+
+            else:
+                Po, Vo, Yo = [theta_dict.get(each) for each in ("Po", "Vo", "Ys")]
+                model_likelihood = -0.5 * (chi_sq - np.log(observed.ivariance))
+                outlier_ivariance = 1.0/(Vo + observed.variance)
+                outlier_likelihood = -0.5 * ((observed.flux - Yo)**2 \
+                    * outlier_ivariance * mask - np.log(outlier_ivariance))
+                mixture_likelihood = np.logaddexp(
+                    np.log(1. - Po) + model_likelihood,
+                    np.log(Po)      + outlier_likelihood)
+                finite = np.isfinite(mixture_likelihood)
+                likelihood += np.sum(mixture_likelihood[finite])
+
+        return likelihood
+
+
+    def _log_probability(self, theta, data, synth_kwargs=None):
+        """
+        Return the logarithmic probability of the model parameters ``theta``.
+
+        :param theta:
+            The values of the ``model.parameters``.
+
+        :type theta:
+            list-type
+
+        :param data:
+            The observed data.
+
+        :type data:
+            :class:`specutils.Spectrum1D`
+
+        :param synth_kwargs: [optional]
+            Keyword arguments to pass directly to :func:`si.synthesise`.
+
+        :type synth_kwargs:
+            dict
+
+        :returns:
+            The logarithmic probability of the parameters ``theta``.
+
+        :rtype:
+            float
+        """
+        
+        log_prior = self._log_prior(theta)
+        if not np.isfinite(log_prior):
+            return log_prior
+        log_likelihood = self._log_likelihood(theta, data, synth_kwargs)
+        log_probability = log_prior + log_likelihood
+        logger.debug("Calculated logarithmic prior, likelihood, and probability"\
+            " for {0} to be {1:.3e}, {2:.3e}, and {3:.3e}".format(
+            ", ".join(["{0} = {1:.3f}".format(p, v) \
+                for p, v in zip(self.parameters, theta)]),
+            log_prior, log_likelihood, log_probability))
+        return log_probability
+
+
+    def optimise(self, data, initial_theta=None, synth_kwargs=None, maxfun=500,
+        maxiter=500, xtol=0.05, ftol=10e10, full_output=False):
         """
         Optimise the logarithmic probability of the model parameters theta given
         the data.
@@ -1777,8 +1935,18 @@ class GenerativeModel(Model):
             bool
         """
 
+        if synth_kwargs is None:
+            synth_kwargs = {}
+        synth_kwargs.setdefault("threads", \
+            self._configuration["settings"].get("max_synth_threads", 1) \
+                if "settings" in self._configuration else 1
+        )
+
         if initial_theta is None:
             initial_theta = self.initial_guess(data, synth_kwargs=synth_kwargs)
+
+        else:
+            self._num_observed_channels = len(data)
 
         # Check to make sure that the initial_theta contains all of the model
         # parameters.
@@ -1798,9 +1966,9 @@ class GenerativeModel(Model):
         }
         t_init = time()
         op_theta, op_fopt, op_niter, op_nfunc, op_warnflag = op.fmin(
-            lambda theta, data: -self._log_probability(theta, data),
+            lambda theta, data, skw: -self._log_probability(theta, data, skw),
             [initial_theta.get(parameter) for parameter in self.parameters],
-            args=(data, ), **op_kwargs)
+            args=(data, synth_kwargs), **op_kwargs)
         self._opt_warn_message(op_warnflag, op_niter, op_nfunc)
 
         t_elapsed = time() - t_init
@@ -1813,122 +1981,8 @@ class GenerativeModel(Model):
         return op_theta_dict
 
 
-    def __call__(self, dispersions, synth_kwargs=None, **theta):
-        """
-        Generate data for the given :math:`\\theta`.
-
-        :param dispersions:
-            A two-length tuple containing the range of wavelengths to synthesise,
-            or a list of two-length tuples containing start and end wavelengths 
-            to synthesise.
-
-        :type dispersions:
-            list 
-
-        :param synth_kwargs: [optional]
-            Keyword arguments to pass directly to :func:`si.synthesise`.
-
-        :type synth_kwargs:
-            dict
-
-        :keyword theta:
-            A dictionary mapping of the model parameters (keys) and values.
-
-        :type theta:
-            dict
-
-        :raises KeyError:
-            If a model parameter is missing from ``**theta.``
-
-        :returns:
-            A list of two-column arrays that represent dispersion and flux for
-            each observed channel in ``data``, or each specified region in
-            ``wavelength_ranges``. 
-
-        :rtype:
-            list
-        """
-        
-        # [TODO] Redshift the *requested* synthesis range based on z in theta?
-
-        missing_parameters = set(self.parameters).difference(theta)
-        if len(missing_parameters) > 0:
-            logging.warn("Generate call is missing some theta parameters: {0}".format(
-                ", ".join(missing_parameters)))
-
-        # Get the number of threads we should use.
-        threads = self._configuration["settings"].get("max_synth_threads", 1) \
-            if "settings" in self._configuration else 1
-
-        if synth_kwargs is None:
-            synth_kwargs = {}
-
-        synth_kwargs["full_output"] = False
-
-        # Request the wavelength step to be ~twice the observed pixel sampling.
-        #if data is not None:
-        #    synth_kwargs.setdefault("wavelength_steps",
-        #        [(0., np.min(np.diff(each.disp))/2., 0.) for each in data])
-            
-        synthesis_ranges = [(each[0], each[-1]) for each in dispersions]
-    
-        # Synthesise the model spectra first (in parallel where applicable) and
-        # then apply the cheap transformations in serial.
-        model_spectra = si.synthesise(theta["teff"], theta["logg"], theta["log_Fe"],
-            theta["xi"], synthesis_ranges, threads=threads, **synth_kwargs)
-
-        continuum_spectra = []
-        for i in range(len(model_spectra)):
-
-            model_spectrum = model_spectra[i]
-            
-            # Apply macroturbulent, vsini and instrumental broadening to the
-            # spectrum.
-            # [TODO] For the moment we only have instrumental broadening.
-            kernel = theta.get("doppler_sigma_{0}".format(i), 0.)
-            if kernel > 0:
-                pixel_kernel = (kernel/(2 * (2*np.log(2))**0.5))/np.mean(np.diff(model_spectrum[:, 0]))
-                model_spectrum[:, 1] = gaussian_filter1d(model_spectrum[:, 1],
-                    pixel_kernel)
-
-            # Apply redshift corrections to the model spectra.
-            z = theta["z"] if "z" in theta else theta.get("z_{0}".format(i), 0)
-            model_spectrum[:, 0] *= (1. + z)
-
-            # Interpolate the new model spectra onto the observed pixels.
-            # We do this before transforming the continuum such that the
-            # continuum spectra (if it is returned with return_continuum)
-            # will always be on the same dispersion map as the returned
-            # spectra.
-            if len(dispersions[i]) > 2:
-                expected = np.interp(dispersions[i], model_spectrum[:, 0],
-                    model_spectrum[:, 1], left=np.nan, right=np.nan)
-                model_spectrum = np.vstack([dispersions[i], expected]).T
-
-            # Apply continuum transformation to the model spectra.
-            j, coefficients = 0, []
-            while "c_{0}_{1}".format(i, j) in theta:
-                coefficients.append(theta["c_{0}_{1}".format(i, j)])
-                j += 1
-
-            if len(coefficients) > 0:
-                continuum_spectra.append(np.polyval(coefficients, model_spectrum[:, 0]))
-                model_spectrum[:, 1] *= continuum_spectra[-1]
-
-            else:
-                # No continuum for this order. Fill it with a None to maintain
-                # order.
-                continuum_spectra.append(None)
-
-            model_spectra[i] = model_spectrum
-
-        #if return_continuum:
-        #    return (model_spectra, continuum_spectra)
-        return model_spectra
-
-
-    def infer(self, data, p0=None, walkers=200, burn_in=100, sample=100,
-        **kwargs):
+    def infer(self, data, optimised_theta=None, p0=None, walkers=20, burn=200, 
+        sample=100, threads=-1, **kwargs):
         """
         Infer the model parameters given the data.
 
@@ -1938,29 +1992,51 @@ class GenerativeModel(Model):
         :type data:
             list of :class:`specutils.Spectrum1D' objects
 
-        :param p0:
-            The initial starting point of shape [TODO].
+        :param optimised_theta: [optional]
+            The optimised point :math:`\Theta_{opt}`. The walkers will start from
+            a multi-dimensional ball centered around this point. You must supply
+            either ``optimised_theta`` or ``p0``, but not both.
+
+        :type optimised_theta:
+            dict
+
+        :param p0: [optional]
+            The initial starting point for the walkers. You must supply either
+            ``optimised_theta`` or ``p0``, but not both.
 
         :type p0:
             :class:`numpy.ndarray`
 
-        :param walkers:
-            The number of Goodman & Weare (2010) ensemble walkers.
+        :param walkers: [optional]
+            The number of Goodman & Weare (2010) ensemble walkers. 
 
         :type walkers:
             int
 
-        :param burn_in:
+        :param burn: [optional]
             The number of MCMC steps to discard as burn-in.
 
-        :type burn_in:
+        :type burn:
             int
 
-        :param sample:
+        :param sample: [optional]
             The number of MCMC steps to sample the posterior with.
         
         :type sample:
             int
+
+        :param threads: [optional]
+            The number of threads to specify to :class:`emcee.EnsembleSampler`.
+            Specifying -1 will set the threads to the number of available CPUs.
+
+        :type threads:
+            int
+
+        :param kwargs: [optional]
+            Keyword arguments to pass directly to :class:`emcee.EnsembleSampler`
+
+        :type kwargs:
+            dict
 
         :returns:
             The posterior quantiles in all parameters, the model sampler, 
@@ -1968,18 +2044,34 @@ class GenerativeModel(Model):
             chains and log-probability values for the burn-in and posterior.
         """
 
-        sampler_kwargs = {
-            "threads": self._configuration["settings"].get("max_sampler_threads", 1) \
-                if "settings" in self._configuration else 1
-        }
-        sampler_kwargs.update(kwargs)
+        if (optimised_theta is None and p0 is None) \
+        or (optimised_theta is not None and p0 is not None):
+            raise ValueError("either optimised_theta *or* p0 must be supplied")
+
+        if 0 > threads:
+            threads = mp.cpu_count()
+
+        mean_acceptance_fractions = np.zeros((burn + sample))
         sampler = emcee.EnsembleSampler(walkers, len(self.parameters),
-            inference.log_probability, args=(self, data), **sampler_kwargs)
+            _inferencer, args=(self, data), threads=threads, **kwargs)
+        
+        # Do we need to create p0 from optimised_theta?
+        if optimised_theta is not None:
+            std = {
+                "teff": 1.,
+                "logg": 0.01,
+                "[M/H]": 0.01,
+                "xi": 0.01,
+            }
+            stds = np.array([std.get(p, 0.01) for p in self.parameters])
+            theta = np.array([optimised_theta[p] for p in self.parameters])
+            p0 = emcee.utils.sample_ball(theta, stds, size=walkers)
 
-        mean_acceptance_fractions = np.zeros((burn_in + sample))
+            #p0 = np.array([theta + 1e-4*np.random.randn(len(self.parameters)) \
+            #    for i in range(walkers)])
+       
 
-        for i, (pos, lnprob, rstate) in enumerate(sampler.sample(p0, \
-            iterations=burn_in)):
+        for i, (pos, lnprob, rstate) in enumerate(sampler.sample(p0, iterations=burn)):
             mean_acceptance_fractions[i] = np.mean(sampler.acceptance_fraction)
             logger.info("Sampler has finished step {0:.0f} of burn-in with "\
                 "<a_f> = {1:.3f}, maximum log probability in last step was "\
@@ -1997,7 +2089,6 @@ class GenerativeModel(Model):
         logger.info("Sampling posterior...")
 
         for j, state in enumerate(sampler.sample(pos, iterations=sample)):
-
             mean_acceptance_fractions[i + j + 1] = np.mean(sampler.acceptance_fraction)
             logger.info("Sampler has finished step {0:.0f} of sampling with "\
                 "<a_f> = {1:.3f}, maximum log probability in last step was "\
@@ -2013,8 +2104,9 @@ class GenerativeModel(Model):
         lnprobability = np.concatenate([lnprobability, sampler.lnprobability], axis=1)
 
         # Get the quantiles.
-        posteriors = dict(zip(self.parameters, map(lambda v: (v[1], v[2]-v[1], v[1]-v[0]),
-            zip(*np.percentile(sampler.chain.reshape(-1, len(self.parameters)), [16, 50, 84], axis=0)))))
+        posteriors = dict(zip(self.parameters,map(lambda v: (v[1], v[2]-v[1], v[1]-v[0]),
+            zip(*np.percentile(sampler.chain.reshape(-1, len(self.parameters)),
+                [16, 50, 84], axis=0)))))
 
         info = {
             "chain": chain,
