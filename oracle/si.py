@@ -300,6 +300,10 @@ class instance(object):
                 raise SIException("no synthetic spectra found in {0}".format(
                     os.path.join(self.twd, "fort.14")))
 
+            if len(synthetic_spectra) == 0:
+                raise SIException("no synthetic spectra found in {0}".format(
+                    os.path.join(self.twd, "fort.14")))
+
             return (equivalent_width, synthetic_spectra, stdout)
         return equivalent_width
 
@@ -410,6 +414,10 @@ class instance(object):
         except IOError:
             raise SIException("no fluxes synthesised by SI in {0}".format(
                 os.path.join(self.twd, "fort.14")))
+
+        if len(spectrum) == 0:
+            raise SIException("no synthetic spectra found in {0}".format(
+                    os.path.join(self.twd, "fort.14")))
 
         if full_output:
             return (spectrum, stdout)

@@ -12,6 +12,7 @@ from textwrap import dedent
 
 import specutils
 import models
+import plot
 
 logger = logging.getLogger("oracle")
 
@@ -38,6 +39,9 @@ class Infer_Solar_GenerativeModel(unittest.TestCase):
             settings:
               max_synth_threads: 10
 
+            mask:
+              - [4860.95, 4861.70]
+
             priors:
               teff: normal(5800, 150)
             """)
@@ -57,22 +61,9 @@ class Infer_Solar_GenerativeModel(unittest.TestCase):
             print("{0}: {1:.2f}".format(parameter, value))
 
         # Create a figure showing the initial point.
-        initial_model_spectra = self.model(
-            dispersions=[spectrum.disp for spectrum in self.data],
-            **initial_theta)
-
-        fig, axes = plt.subplots(len(self.data), figsize=(25, 2*len(self.data)))
-        axes = [axes] if len(self.data) == 1 else axes
-        for ax, observed_spectrum, model_spectrum in zip(axes, self.data,
-            initial_model_spectra):
-
-            ax.plot(observed_spectrum.disp, observed_spectrum.flux, 'k')
-            ax.plot(model_spectrum[:, 0], model_spectrum[:, 1], 'b')
-            ax.set_xlabel("Wavelength, $\lambda$ ($\AA$)")
-            ax.set_ylabel("Flux, $F_\lambda$")
-
+        fig = plot.comparison(self.data, self.model, theta=initial_theta)
         fig.savefig("{0}-initial.pdf".format(self.output_prefix))
-
+        
         # Perform the optimisation from the initial guess point.
         optimised_theta = self.model.optimise(self.data, initial_theta)
 

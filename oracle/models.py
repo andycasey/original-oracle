@@ -554,8 +554,8 @@ class Model(object):
         mask = np.ones(len(dispersion))
         if self.masks is not None:
             for start, end in self.masks * (1. + z):
-                indices = mask.searchsorted(start, end)
-                mask[indices[0]:indices[1] + 1] = mask_value
+                indices = mask.searchsorted([start, end])
+                mask[indices[0]:indices[1] + 1] = fill_value
         return mask
 
 
@@ -1721,7 +1721,7 @@ class GenerativeModel(Model):
 
 
     def optimise(self, data, initial_theta=None, synth_kwargs=None, maxfun=10e3,
-        maxiter=100, xtol=0.001, ftol=0.001, full_output=False):
+        maxiter=10e3, xtol=0.001, ftol=0.001, full_output=False):
         """
         Optimise the logarithmic probability of the model parameters theta given
         the data.
