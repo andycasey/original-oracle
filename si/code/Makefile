@@ -1,7 +1,7 @@
 SHELL   = /bin/sh
 
 # define detail root directory
-#EXEDIR = ~/codes/si/fortran
+EXEDIR = ..
 BASEDIR = $(EXEDIR)/code
 MAKEDIR = $(BASEDIR)
 CODEDIR = $(BASEDIR)

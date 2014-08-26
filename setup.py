@@ -4,10 +4,8 @@
 
 import os
 import re
+import subprocess
 import sys
-
-from signal import alarm, signal, SIGALRM, SIGKILL
-from subprocess import PIPE, Popen
 
 try:
     from setuptools import setup
@@ -42,48 +40,13 @@ if "install" in sys.argv:
             "version from https://software.intel.com/en-us/intel-fortran-compo"\
             "ser-xe-evaluation-options")
 
-    timeout = 240
-    class Alarm(Exception):
-        pass
-
-    def alarm_handler(signum, frame):
-        raise Alarm
-
+    # Install SI
+    print("Installing SI..")
     cwd = os.path.join(os.path.dirname(os.path.abspath(
         os.path.expanduser(__file__))), "si/code")
-    env = {
-        "PATH": os.getenv("PATH"),
-        "EXEDIR": os.path.join(os.path.dirname(os.path.abspath(
-            os.path.expanduser(__file__))), "si"),
-    }
-
-    print("Compiling SI..")
-    p = Popen(["make"],
-        shell=False, bufsize=2056, stdin=PIPE, stdout=PIPE, stderr=PIPE,
-        cwd=cwd, env=env, close_fds=True)
-
-    if timeout != -1:
-        signal(SIGALRM, alarm_handler)
-        alarm(timeout)
-
-    try:
-        stdout, stderr = p.communicate()
-        print("SI Installer output (code {0}):\n{1}".format(p.returncode, stdout))
-        if timeout != -1:
-            alarm(0)
-
-    except Alarm:
-        # Process might have died before getting to this line so wrap it to
-        # avoid "OSError: no such process"
-        try:
-            os.kill(p.pid, SIGKILL)
-        except OSError:
-            pass
-        raise Exception("The SI install process was killed due to timeout.")
-
-    if p.returncode != 0:
-        raise Exception("Could not install SI Fortran code (error {0}):\n{1}\n{2}".format(
-            p.returncode, stdout, stderr))
+    installer = subprocess.call("make", cwd=cwd, shell=True)
+    if installer != 0:
+        raise Exception("SI fortran code could not be compiled")
 
 setup(name="oracle",
     version=version,
@@ -99,5 +62,5 @@ setup(name="oracle",
     entry_points={
         "console_scripts": ["oracle = oracle.cli:main"]
     },
-    scripts=["fortran/si_lineform"]
+    scripts=["si/si_lineform"]
 )
