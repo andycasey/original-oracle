@@ -23,6 +23,8 @@
    sudo python setup.py install 
    ````
 
+
+
 **Updating ``oracle``**
 
 If there are changes to ``oracle`` you can update by doing:
@@ -36,6 +38,8 @@ python setup.py install --user
 # OR if you have sudo access:
 sudo python setup.py install
 ````
+
+
 
 **Contributing to ``oracle``**
 
@@ -75,6 +79,7 @@ If you would like to contribute something to ``oracle`` (e.g., code, line lists,
 The process might seem long but it's to keep a good version control history, and it means (later on down the track) we can automatically
 run tests on new code in a pull request, to make sure that the changes don't break anything. It also cements your contributions to this
 work for anyone else to see!
+
 
 
 ** Reporting bugs and requesting features **

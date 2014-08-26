@@ -10,7 +10,7 @@ EXEFILE = $(shell pwd)/../si_lineform
 PREOBJCS= 
 
 FF      = ifort
-FFLAGS  = -vms -assume nounderscore -align dcommons -cpp -c  -g0 -O3 -shared-intel # -mcmodel=medium #nounderflow
+FFLAGS  = -vms -assume nounderscore -align dcommons -cpp -c  -g0 -O3 -shared-intel
 
 CC      = cc
 CFLAGS  = -c
