@@ -37,10 +37,15 @@ def comparison(observed_spectra, model, theta, figsize=None,
 
     K = len(observed_spectra)
     if figsize is None:
-        figsize = (25, 3 * len(observed_spectra))
+        figsize = (25, 4 * len(observed_spectra))
 
-    model_spectra = model(dispersions=[s.disp for s in observed_spectra],
-        **theta)
+    threads = model._configuration["settings"].get("max_synth_threads", 1) \
+        if "settings" in model._configuration else 1
+    try:
+        model_spectra = model(dispersions=[s.disp for s in observed_spectra],
+            synth_kwargs={"threads": threads}, **theta)
+    except:
+        model_spectra = [None] * K
 
     fig, axes = plt.subplots(K, figsize=figsize)
     axes = [axes] if K == 1 else axes
@@ -54,7 +59,8 @@ def comparison(observed_spectra, model, theta, figsize=None,
     in zip(axes, observed_spectra, model_spectra):
 
         # Plot the spectra
-        ax.plot(model_spectrum[:, 0], model_spectrum[:, 1], model_color)
+        if model_spectrum is not None:
+            ax.plot(model_spectrum[:, 0], model_spectrum[:, 1], model_color)
         ax.plot(observed_spectrum.disp, observed_spectrum.flux, observed_color)
         
         # Show the mask
@@ -67,8 +73,8 @@ def comparison(observed_spectra, model, theta, figsize=None,
                     edgecolor='none')
 
         ax.set_xlim(obs_start, obs_end)
-        ax.set_xlabel("Wavelength, $\lambda$ ($\AA$)")
         ax.set_ylabel("Flux, $F_\lambda$")
+    ax.set_xlabel("Wavelength, $\lambda$ ($\AA$)")    
 
     return fig
 

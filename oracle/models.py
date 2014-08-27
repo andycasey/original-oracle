@@ -1530,16 +1530,6 @@ class GenerativeModel(Model):
             # will always be on the same dispersion map as the returned
             # spectra.
             if len(dispersions[i]) > 2:
-                model_spacing = np.diff(model_spectrum[:, 0])
-                mean_dispersion_spacing = np.mean(np.diff(dispersions[i]))
-                percentile = 100. - stats.percentileofscore(model_spacing,
-                    mean_dispersion_spacing)
-
-                if percentile > 25.:
-                    warnings.warn("More than {0:.0f}% of the synthesised pixels"\
-                        " are sampled at larger intervals than the observed "\
-                        "spectrum.")
-
                 expected = np.interp(dispersions[i], model_spectrum[:, 0],
                     model_spectrum[:, 1], left=np.nan, right=np.nan)
                 model_spectrum = np.vstack([dispersions[i], expected]).T
@@ -1587,11 +1577,7 @@ class GenerativeModel(Model):
             dict
         """
 
-        if synth_kwargs is None:
-            synth_kwargs = {}
-
-        synth_kwargs.setdefault("threads", self._configuration["settings"].get(
-            "max_synth_threads", 1) if "settings" in self._configuration else 1)
+        synth_kwargs = self._get_speedy_synth_kwargs(data, synth_kwargs)
 
         parameter_guess = {}
         environment = dict(zip(["locals", "globals", "__name__", "__file__",
@@ -1812,8 +1798,19 @@ class GenerativeModel(Model):
         """
 
         theta_dict = dict(zip(self.parameters, theta))
-        expected = self(dispersions=[spectrum.disp for spectrum in data],
-            synth_kwargs=synth_kwargs, **theta_dict)
+        try:
+            expected = self(dispersions=[spectrum.disp for spectrum in data],
+                synth_kwargs=synth_kwargs, **theta_dict)
+
+        except:
+            # Probably unrealistic astrophysical parameters requested.
+            # SI fell over, so we will too.
+            # This is OK though: if *all* walkers fell over simultaneously then
+            # we would still end up raising an exception
+            return -np.inf
+
+        if expected is None:
+            return -np.inf
 
         z = theta_dict.get("z", 0.)
         likelihood = 0
@@ -1883,8 +1880,92 @@ class GenerativeModel(Model):
         return log_probability
 
 
+    def _get_speedy_synth_kwargs(self, data, synth_kwargs=None, undersample_rate=10):
+        """ Get default synth_kwargs that are optimised for speediness. """
+
+        if synth_kwargs is None:
+            synth_kwargs = {}
+
+        synth_kwargs.setdefault("chunk", True)
+        synth_kwargs.setdefault("threads", self._configuration["settings"].get(
+            "max_synth_threads", 1) if "settings" in self._configuration else 1)
+        synth_kwargs.setdefault("wavelength_steps",
+            [(wls, wls, wls) for wls in [undersample_rate*np.median(np.diff(s.disp)) \
+                for s in data]])
+        return synth_kwargs
+
+
+    def scatter(self, data, num, synth_kwargs=None):
+        """
+        Randomly draw points ``num`` from the parameter space and calculate the
+        logarithmic probability at each point. The most probable point is
+        returned.
+
+        :param data:
+            A list of the observed spectra.
+
+        :type data:
+            list of :class:`specutils.Spectrum1D` objects
+
+        :param num:
+            The number of points to draw from the parameter space.
+
+        :type num:
+            int
+
+        :param synth_kwargs: [optional]
+            Keyword arguments to pass directly to :func:`si.synthesise`
+
+        :type synth_kwargs:
+            dict
+
+        :returns:
+            The most probable sampled point.
+
+        :rtype:
+            dict
+        """
+
+        """
+        # [TODO] parallelise
+        :param threads: [optional]
+            The number of parallel threads to use for random scattering. If
+            ``threads`` is a negative number then the number of threads will be
+            set by :func:`multiprocessing.cpu_count`.
+
+        :type threads:
+            int
+        """
+
+        synth_kwargs = self._get_speedy_synth_kwargs(data, synth_kwargs)
+
+        best_theta, highest_log_prob = None, None
+        for i in xrange(num):
+            theta_dict = self.initial_guess(data, synth_kwargs)
+            theta = [theta_dict[p] for p in self.parameters]
+            log_prob = self._log_probability(theta, data, synth_kwargs)
+
+            # Is this the best so far?
+            if highest_log_prob is None \
+            or (np.isfinite(log_prob) and log_prob > highest_log_prob):
+                best_theta, highest_log_prob = theta_dict, log_prob
+
+        # If we have gotten to this point and found no reasonable starting
+        # point then we should just keep trying until we get *a* start point
+        while highest_log_prob is None:
+            theta_dict = self.initial_guess(data, synth_kwargs)
+            theta = [theta_dict[p] for p in self.parameters]
+            log_prob = self._log_probability(theta, data, synth_kwargs)
+
+            if (np.isfinite(log_prob) and log_prob > highest_log_prob):
+                best_theta, highest_log_prob = theta_dict, log_prob
+                break
+
+        return best_theta
+
+
     def optimise(self, data, initial_theta=None, synth_kwargs=None, maxfun=500,
-        maxiter=500, xtol=0.05, ftol=10e10, full_output=False):
+        maxiter=500, xtol=0.10, ftol=10e10, full_output=False):
         """
         Optimise the logarithmic probability of the model parameters theta given
         the data.
@@ -1940,12 +2021,7 @@ class GenerativeModel(Model):
             bool
         """
 
-        if synth_kwargs is None:
-            synth_kwargs = {}
-        synth_kwargs.setdefault("threads", \
-            self._configuration["settings"].get("max_synth_threads", 1) \
-                if "settings" in self._configuration else 1
-        )
+        synth_kwargs = self._get_speedy_synth_kwargs(data, synth_kwargs)
 
         if initial_theta is None:
             initial_theta = self.initial_guess(data, synth_kwargs=synth_kwargs)
@@ -2063,10 +2139,10 @@ class GenerativeModel(Model):
         # Do we need to create p0 from optimised_theta?
         if optimised_theta is not None:
             std = {
-                "teff": 1.,
-                "logg": 0.01,
-                "[M/H]": 0.01,
-                "xi": 0.01,
+                "teff":  10.,
+                "logg":  0.05,
+                "[M/H]": 0.05,
+                "xi":    0.05,
             }
             stds = np.array([std.get(p, 0.01) for p in self.parameters])
             theta = np.array([optimised_theta[p] for p in self.parameters])
@@ -2098,7 +2174,7 @@ class GenerativeModel(Model):
             logger.info("Sampler has finished step {0:.0f} of sampling with "\
                 "<a_f> = {1:.3f}, maximum log probability in last step was "\
                 "{2:.3e}".format(j + 1, mean_acceptance_fractions[i + j + 1],
-                    np.max(sampler.lnprobability[:, i + j + 1])))
+                    np.max(sampler.lnprobability[:, j])))
 
             if mean_acceptance_fractions[i + j + 1] in (0, 1):
                 raise RuntimeError("mean acceptance fraction is {0:.0f}!".format(

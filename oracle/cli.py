@@ -58,7 +58,7 @@ def solve(args):
     spectra = map(specutils.Spectrum.load, args.spectra_filenames)
   
     # Make some initial guess of the model parameters.
-    initial_guess = model.initial_guess(spectra)   
+    initial_guess = model.scatter(spectra, args.num_scatter_points)
     logger.info("Initial guess for model parameters:")
     for parameter, value in initial_guess.iteritems():
         logger.info("\t{0}: {1:.2f}".format(parameter, value))
@@ -145,6 +145,10 @@ def main():
 
     solve_parser.add_argument("spectra_filenames", nargs="+",
         help="Filenames of (observed) spectroscopic data.")
+
+    solve_parser.add_argument("-s", "--num_scatter_points", dest="num_scatter_points",
+        action="store", default=1, help="Number of scatter points to sample before"\
+        " starting numerical optimisation (default: %(default)s).", type=int)
 
     solve_parser.add_argument("--no-plots", dest="plotting", action="store_false",
         default=True, help="Disable plotting.")

@@ -301,6 +301,7 @@ class instance(object):
                 synthetic_spectra = np.loadtxt(os.path.join(self.twd, "fort.14"))
 
             except IOError:
+                return None
                 logger.warn("No synthetic spectra found in {0}:".format(
                     os.path.join(self.twd, "fort.14")))
                 logger.warn("SI output (code {0}):\n{1}\n{2}".format(
@@ -309,6 +310,7 @@ class instance(object):
                     os.path.join(self.twd, "fort.14")))
 
             if len(synthetic_spectra) == 0:
+                return None
                 logger.warn("No synthetic spectra found in {0}:".format(
                     os.path.join(self.twd, "fort.14")))
                 logger.warn("SI output (code {0}):\n{1}\n{2}".format(
@@ -396,9 +398,9 @@ class instance(object):
             {metallicity:+.3f}
             {xi:.3f}
             {wl_start:.2f} {wl_end:.2f}
-            {min_wl_step:.1f} {max_wl_step:.3f}
+            {min_wl_step:.2f} {max_wl_step:.4f}
             32811
-            {opt_wl_step:.3f}
+            {opt_wl_step:.4f}
             """.format(teff=teff, logg=logg, metallicity=metallicity, xi=xi,
                 wl_start=min(wavelengths), wl_end=max(wavelengths),
                 min_wl_step=wavelength_steps[1] * 1000.,
@@ -424,6 +426,7 @@ class instance(object):
             spectrum = np.loadtxt(os.path.join(self.twd, "fort.14"))
 
         except IOError:
+            return None
             logger.warn("No synthetic spectra found in {0}:".format(
                 os.path.join(self.twd, "fort.14")))
             logger.warn("SI output (code {0}):\n{1}\n{2}".format(
@@ -432,6 +435,7 @@ class instance(object):
                 os.path.join(self.twd, "fort.14")))
 
         if len(spectrum) == 0:
+            return None
             logger.warn("No synthetic spectra found in {0}:".format(
                 os.path.join(self.twd, "fort.14")))
             logger.warn("SI output (code {0}):\n{1}\n{2}".format(
@@ -718,6 +722,7 @@ def synthesise(teff, logg, metallicity, xi, wavelengths,
             stdouts.append(stdout)
 
             if len(spectrum) == 0:
+                return None
                 raise SIException("no fluxes found in spectrum chunk")
 
             if chunk:
