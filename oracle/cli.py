@@ -40,18 +40,8 @@ def _check_for_existing_files(args):
                 if os.path.exists(f)])))
 
 
-def solve(args):
-
-    # Load the configuration file into a model.
-    if args.analysis_type != "generative":
-        raise NotImplementedError("only generative analyses are currently "\
-            "available from the command line function")
-
-    # Before doing heaps of analysis, look to see if we intend to create some
-    # files and if those files already exist -- and we have been told not to 
-    # clobber them -- then we should raise an exception now before doing any
-    # real work
-    _check_for_existing_files(args)
+def solve_generative(args):
+    """ Generative Model Solver """
 
     # Create the model and load the spectra.
     model = models.GenerativeModel(args.config_filename)
@@ -93,7 +83,40 @@ def solve(args):
 
     raise a
 
-    # 
+
+def solve_classical(args):
+    """ Classical Model Solver """
+
+    # Create the model and load the spectra.
+    data = map(specutils.Spectrum.load, args.spectra_filenames)
+    model = models.StellarSpectrum(args.config_filename, data)
+
+    optimised_parameters = model.optimise(data)
+
+    raise a
+    posterior, sampler, info = model.infer(data, optimised_parameters)
+
+
+
+
+def solve(args):
+
+    # Before doing heaps of analysis, look to see if we intend to create some
+    # files and if those files already exist -- and we have been told not to 
+    # clobber them -- then we should raise an exception now before doing any
+    # real work
+    _check_for_existing_files(args)
+
+    if args.analysis_type == "generative":
+        solve_generative(args)
+
+    elif args.analysis_type == "classical":
+        solve_classical(args)
+
+    else:
+        raise NotImplementedError("how did you get here?")
+
+
 
 
 

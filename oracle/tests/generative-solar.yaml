@@ -1,0 +1,21 @@
+model:
+  redshift: no
+  outliers: no
+  continuum: no
+  doppler_broadening: yes
+
+settings:
+  max_synth_threads: 16
+
+mask:
+  - [4860.95, 4861.70] # hydrogen line
+  - [6562.2, 6563.4] # hydrogen line
+  - [7550, 7700] # telluric
+
+priors:
+  teff: normal(5800, 150)
+
+sampler:
+  walkers: 200
+  burn: 200
+  sample: 100

@@ -26,7 +26,8 @@ class Infer_18Sco_ClassicalModel(unittest.TestCase):
         """ Load the spectra and establish the StellarSpectrum model. """
 
         # Load the data.
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data/")
+        path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "data/benchmarks")
         self.data = map(specutils.Spectrum1D.load, 
             glob(os.path.join(path, "18Sco_?_?.txt")))
 
@@ -173,6 +174,7 @@ class Infer_18Sco_ClassicalModel(unittest.TestCase):
 
         optimised_parameters = self.model.optimise(self.data)
 
+        raise a
         posterior, sampler, info = self.model.infer(self.data,
             optimised_parameters)
 

@@ -42,7 +42,7 @@ def gaussian(mu, sigma, x):
     return np.exp(-(x - mu)**2 / (2*sigma**2))
 
 
-def voigt(mu, fwhm, amplitude, shape, x):
+def voigt(mu, fwhm, shape, x):
     """
     Evaluates a Voigt absorption profile across the `x`
     values with a given local continuum.
@@ -56,9 +56,6 @@ def voigt(mu, fwhm, amplitude, shape, x):
     :param fwhm:
         The full-width half-maximum of the Gaussian profile.
 
-    :param amplitude:
-        The amplitude of the line.
-
     :param shape:
         The shape parameter.
 
@@ -67,10 +64,9 @@ def voigt(mu, fwhm, amplitude, shape, x):
     """
     n = len(x) if not isinstance(x, float) else 1
 
-    profile = 1 / wofz(np.zeros((n)) + 1j * np.sqrt(np.log(2.0)) * shape).real
-    profile *= amplitude * wofz(2*np.sqrt(np.log(2.0)) * (x - mu)/fwhm \
+    profile = 1. / wofz(np.zeros((n)) + 1j * np.sqrt(np.log(2.0)) * shape).real
+    return profile * wofz(2*np.sqrt(np.log(2.0)) * (x - mu)/fwhm \
         + 1j * np.sqrt(np.log(2.0))*shape).real
-    return profile
     
 
 def atomic_number(element):

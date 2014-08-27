@@ -30,6 +30,15 @@ def comparison(observed_spectra, model, theta, figsize=None,
     :param theta:
         The :math:`\Theta` values to use to calculate model spectra for 
         comparison.
+
+    :type theta:
+        dict
+
+    :returns:
+        A spectrum comparison figure.
+
+    :rtype:
+        :class:`matplotlib.Figure`
     """
 
     if isinstance(observed_spectra, specutils.Spectrum1D):
