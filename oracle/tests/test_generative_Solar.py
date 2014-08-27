@@ -46,8 +46,7 @@ class Infer_Solar_GenerativeModel(unittest.TestCase):
               teff: normal(5800, 150)
             """)
         self.model = models.GenerativeModel(configuration)
-        print("Model parameters: {0}".format(", ".join(self.model.parameters)))
-
+        
 
     def runTest(self):
         
@@ -60,6 +59,7 @@ class Infer_Solar_GenerativeModel(unittest.TestCase):
         for parameter, value in initial_theta.iteritems():
             print("{0}: {1:.2f}".format(parameter, value))
 
+        raise a
         # Create a figure showing the initial point.
         fig = plot.comparison(self.data, self.model, theta=initial_theta)
         fig.savefig("{0}-initial.pdf".format(self.output_prefix))
