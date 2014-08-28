@@ -57,7 +57,7 @@ def solve_generative(args):
     if args.plotting:
         path = os.path.abspath(os.path.expanduser(
             "{0}-initial.{1}".format(args.output_prefix, args.plot_fmt)))
-        fig = plot.comparison(spectra, model, initial_guess)
+        fig = plot.spectrum_comparison(spectra, model, initial_guess)
         fig.savefig(path)
         plt.close(fig)
 
@@ -70,7 +70,7 @@ def solve_generative(args):
     if args.plotting:
         path = os.path.abspath(os.path.expanduser(
             "{0}-optimal.{1}".format(args.output_prefix, args.plot_fmt)))
-        fig = plot.comparison(spectra, model, optimised_theta)
+        fig = plot.spectrum_comparison(spectra, model, optimised_theta)
         fig.savefig(path)
         plt.close(fig)
 

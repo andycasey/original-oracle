@@ -44,7 +44,7 @@ _log_prior_eval_environment = {
 
 class AbsorptionProfile(object):
 
-    def __init__(self, wavelength, method="gaussian", mask=None, outliers=False,
+    def __init__(self, wavelength, profile="gaussian", mask=None, outliers=False,
         wavelength_tolerance=0.0, wavelength_contribution=0.5):
         """
         Model an absorption profile in a spectrum.
@@ -55,10 +55,10 @@ class AbsorptionProfile(object):
         :type wavelength:
             float
 
-        :param method: [optional]
+        :param profile: [optional]
             The type of profile to use. Available profiles are Gaussian or Voigt.
 
-        :type method:
+        :type profile:
             str
 
         :param mask: [optional]
@@ -96,13 +96,13 @@ class AbsorptionProfile(object):
             float
 
         :raises ValueError:
-            If the ``method`` specified is not Voigt or Gaussian, or if the 
+            If the ``profile`` specified is not Voigt or Gaussian, or if the 
             ``wavelength_tolerance``, ``wavelength_contribution`` values are negative.
         """
 
-        self.method = method.lower()
-        if self.method not in ("gaussian", "voigt"):
-            raise ValueError("method must be either Gaussian or Voigt")
+        self.profile = profile.lower()
+        if self.profile not in ("gaussian", "voigt"):
+            raise ValueError("profile must be either Gaussian or Voigt")
 
         if 0 > wavelength_tolerance:
             raise ValueError("wavelength tolerance must be a positive quantity")
@@ -123,9 +123,9 @@ class AbsorptionProfile(object):
         """ Return the model parameters. """
 
         parameters = ["ld"]
-        if self.method == "voigt":
+        if self.profile == "voigt":
             parameters.extend(["fwhm", "shape"])
-        elif self.method == "gaussian":
+        elif self.profile == "gaussian":
             parameters.append("sigma")
 
         if self.wavelength_tolerance > 0:
@@ -166,11 +166,11 @@ class AbsorptionProfile(object):
         """
 
         wavelength = theta.get("wl", self.approx_wavelength)
-        if self.method == "voigt":
+        if self.profile == "voigt":
             depth, shape, fwhm = [theta[p] for p in ("ld", "shape", "fwhm")]
             flux = continuum * (1. - depth * utils.voigt(wavelength, fwhm, shape,
                 dispersion))
-        elif self.method == "gaussian":
+        elif self.profile == "gaussian":
             depth, sigma = theta["ld"], theta["sigma"]
             flux = continuum * (1. - depth * utils.gaussian(wavelength, sigma,
                 dispersion))
@@ -197,17 +197,18 @@ class AbsorptionProfile(object):
         theta_dict = dict(zip(self.parameters, theta))
         if (self.wavelength_tolerance > 0 \
         and abs(self.approx_wavelength - theta_dict["wl"]) > self.wavelength_tolerance) \
-        or not (1 > theta_dict.get("Po", 0.5) > 0) or 0 > theta_dict.get("Vo", 1) \
-        or not (1 >= theta_dict.get("ld", 0.5) >= 0) \
-        or not (0.5 > theta_dict.get("sigma", 0.0) >= 0) \
-        or not (1.0 > theta_dict.get("fwhm", 0.0) >= 0):
+        or not (1 > theta_dict.get("Po", 0.5) > 0) \
+        or not (10000 > theta_dict.get("Vo", 1) > 0) \
+        or not (1 >= theta_dict.get("ld", 0.5) >= 0):
+            #or not (0.5 > theta_dict.get("sigma", 0.0) >= 0) \
+            #or not (1.0 > theta_dict.get("fwhm", 0.0) >= 0):
             return -np.inf
 
         # It doesn't make a *lot* of sense allowing priors for individual parameters
         # in the AbsorptionProfile model, but we can come back to this.
         # [TODO]
         #ln_prior = 0
-        #for parameter, distribution in self._configuration.get("priors", {}).iteritems():
+        #for parameter, distribution in self.config.get("priors", {}).iteritems():
         #    f = eval(distribution, _log_prior_eval_environment)
         #    ln_prior += f(theta_dict[parameter])
         return 0
@@ -248,7 +249,7 @@ class AbsorptionProfile(object):
 
         # Build an extra mask if only nearby points contribute to the model.
         if self.wavelength_contribution > 0:
-            wavelength = theta_dict.get("wavelength", self.approx_wavelength)
+            wavelength = theta_dict.get("wl", self.approx_wavelength)
             indices = data.disp.searchsorted([
                 wavelength - self.wavelength_contribution,
                 wavelength + self.wavelength_contribution
@@ -314,6 +315,7 @@ class AbsorptionProfile(object):
             return log_prior
         return log_prior + self._log_likelihood(theta, data, continuum)
         
+
     def initial_guess(self, data, continuum):
         """
         Return an initial guess for the model parameters.
@@ -348,8 +350,8 @@ class AbsorptionProfile(object):
         return dict(zip(self.parameters, [theta[p] for p in self.parameters]))
 
 
-    def optimise(self, data, continuum, maxfun=10e3, maxiter=10e3, xtol=1e-8,
-        ftol=1e-8, full_output=False):
+    def optimise(self, data, continuum, maxfun=10e3, maxiter=10e3, xtol=1e-12,
+        ftol=1e-12, full_output=False):
         """
         Optimise the model parameters given the data.
 
@@ -444,27 +446,27 @@ class Model(object):
 
         if isinstance(configuration, dict):
             # Make a copy of the configuration.
-            self._configuration = {}
-            self._configuration.update(configuration)
+            self.config = {}
+            self.config.update(configuration)
 
         else:
             if not os.path.exists(configuration):
                 # Probably a string configuration.
                 try:
-                    self._configuration = yaml.load(configuration)
+                    self.config = yaml.load(configuration)
                 except:
                     raise IOError("configuration file does not exist or the "\
                         "string configuration is not valid YAML")
             else:
                 with open(configuration, "r") as fp:
-                    self._configuration = yaml.load(fp)
+                    self.config = yaml.load(fp)
 
         # Check the configuration is valid.
         self._validate()
 
         # Set the masks.
-        self.masks = np.array(self._configuration["mask"]) \
-            if "mask" in self._configuration else None
+        self.masks = np.array(self.config["mask"]) \
+            if "mask" in self.config else None
 
         return None
 
@@ -472,14 +474,14 @@ class Model(object):
     def _validate(self):
         """ Check that the configuration is valid. """
 
-        if not self._configuration.has_key("model"):
+        if not self.config.has_key("model"):
             raise KeyError("no model information specified")
 
         validation_functions = {
             "continuum": self._validate_continuum,
             "elements": self._validate_elements
         }
-        for item, state in self._configuration["model"].iteritems():
+        for item, state in self.config["model"].iteritems():
             if not state or item not in validation_functions: continue
             validation_functions[item]()
 
@@ -490,11 +492,11 @@ class Model(object):
         """ Check that the continuum configuration is valid. """
         
         # We actually need *something* specified to model the continuum.
-        if not self._configuration.has_key("continuum"):
+        if not self.config.has_key("continuum"):
             raise KeyError("no information specified for continuum modelling")
 
-        order = self._configuration["continuum"]["order"]
-        assert self._configuration["continuum"]["method"] == "polynomial"
+        order = self.config["continuum"]["order"]
+        assert self.config["continuum"]["method"] == "polynomial"
         assert order
 
         # Order should be integer or list-like of integers.
@@ -504,7 +506,7 @@ class Model(object):
             except:
                 raise TypeError("continuum order must be an integer or a list-\
                     like of integers")
-        self._configuration["continuum"]["order"] = order
+        self.config["continuum"]["order"] = order
         
         return True
 
@@ -512,7 +514,7 @@ class Model(object):
     def _validate_elements(self):
         """ Check that the elements actually exist. """
 
-        map(utils.atomic_number, self._configuration["model"]["elements"])
+        map(utils.atomic_number, self.config["model"]["elements"])
         return True
 
 
@@ -531,7 +533,7 @@ class Model(object):
         return None
 
 
-    def mask(self, dispersion, z, fill_value=np.nan):
+    def mask(self, dispersion, z=0., fill_value=np.nan):
         """
         Return an array mask for a given dispersion array and redshift, based on
         the mask information provided in the model configuration file.
@@ -542,7 +544,7 @@ class Model(object):
         :type dispersion:
             :class:`numpy.array`
 
-        :param z:
+        :param z: [optional]
             The redshift to apply.
 
         :type z:
@@ -565,7 +567,7 @@ class Model(object):
         mask = np.ones(len(dispersion))
         if self.masks is not None:
             for start, end in self.masks * (1. + z):
-                indices = mask.searchsorted([start, end])
+                indices = dispersion.searchsorted([start, end])
                 mask[indices[0]:indices[1] + 1] = fill_value
         return mask
 
@@ -580,9 +582,8 @@ def _inferencer(theta, _class, *args):
 
 class SpectralChannel(Model):
 
-    wavelength_tolerance = 0.05
-
-    def __init__(self, configuration, channel_index=None,
+    
+    def __init__(self, configuration, channel_index,
         absorption_profile_kwargs=None):
         """
         A class to model a stellar spectrum with a combination of continuum and
@@ -612,28 +613,17 @@ class SpectralChannel(Model):
 
         super(SpectralChannel, self).__init__(configuration)
         self._data = None
-        self.channel_index = (str(channel_index), "")[channel_index is None]
+        self.channel_index = channel_index
 
-        absorption_profile_kwargs = absorption_profile_kwargs \
+        self.absorption_profile_kwargs = absorption_profile_kwargs \
             if absorption_profile_kwargs is not None else {}
 
-        faux_profile = AbsorptionProfile(0)
-        self.absorption_profile_kwargs = {
-            "method": faux_profile.method,
-            "mask": faux_profile.mask,
-            "outliers": faux_profile.outliers,
-            "wavelength_tolerance": faux_profile.wavelength_tolerance,
-            "wavelength_contribution": faux_profile.wavelength_contribution,
-        }
-        self.absorption_profile_kwargs.update(absorption_profile_kwargs)
-
-
-        # TODO REMOVE
-        #self.absorption_profile_kwargs.update({
-        #    "method": "gaussian",
-        #    "wavelength_tolerance": 0.05,
-        #    "outliers": True,
-        #    })
+        fake_transition = AbsorptionProfile(0)
+        keywords = ("profile", "wavelength_tolerance", "wavelength_contribution")
+        for keyword in keywords:
+            self.absorption_profile_kwargs.setdefault(keyword,
+                self.config["balance"].get(
+                    keyword, getattr(fake_transition, keyword)))
         return None
 
 
@@ -645,7 +635,7 @@ class SpectralChannel(Model):
             return self._parameters
 
         parameters = []
-        config = self._configuration
+        config = self.config
         
         # Any redshift parameters?
         if config["model"]["redshift"]:
@@ -653,11 +643,11 @@ class SpectralChannel(Model):
 
         # Any continuum parameters?
         if config["model"]["continuum"]:
-            for i, order in enumerate(config["continuum"]["order"]):
-                if (i + 1) == self.channel_index \
-                or (len(self.channel_index) == 0 and i == 0):
-                    parameters.extend(["c_{0}_{0}".format(self.channel_index, j) \
-                        for j in range(order)])
+            order = config["continuum"]["order"]
+            order = order if isinstance(order, int) \
+                else order[self.channel_index]
+            parameters.extend(["c_{0}_{0}".format(self.channel_index, j) \
+                for j in range(order)])
 
         # Any outlier parameters?
         if config["model"]["outliers"]:
@@ -729,45 +719,24 @@ class SpectralChannel(Model):
             flux = np.ones(len(dispersion))
 
         # Model the absorption profiles!
-        method = self.absorption_profile_kwargs["method"]
+        profile = self.absorption_profile_kwargs["profile"]
         wavelength_contribution = self.absorption_profile_kwargs["wavelength_contribution"]
-        for i, (wavelength, species) in enumerate(self._configuration["balance"]["atomic_lines"]):
+        for i, (wavelength, species) in enumerate(self.config["balance"]["atomic_lines"]):
             # Should we be modelling this line?
             if "ld_{0}".format(i) in self.parameters:
                 wavelength = theta.get("wl_{0}".format(i), wavelength)
 
-                if wavelength_contribution > 0:
+                if profile == "voigt":
+                    depth, shape, fwhm = [theta["_".join([p, str(i)])] \
+                        for p in ("ld", "shape", "fwhm")]
+                    if 0 > fwhm: continue
+                    flux *= 1. - depth * utils.voigt(wavelength, fwhm, shape, dispersion)
 
-                    indices = dispersion.searchsorted([
-                        wavelength - wavelength_contribution,
-                        wavelength + wavelength_contribution
-                    ])
-                    x = dispersion.__getslice__(*indices)
-                    y = flux.__getslice__(*indices)
-                    
-                    if method == "voigt":
-                        depth, shape, fwhm = [theta["_".join([p, str(i)])] \
-                            for p in ("ld", "shape", "fwhm")]
-                        flux.__setslice__(indices[0], indices[1],
-                            y * (1. - depth * utils.voigt(wavelength, fwhm, shape, x)))
-
-                    elif method == "gaussian":
-                        depth, sigma = [theta["_".join([p, str(i)])] \
-                            for p in ("ld", "sigma")]
-                        flux.__setslice__(indices[0], indices[1],
-                            y * (1. - depth * utils.gaussian(wavelength, sigma, x)))
-
-
-                else:
-                    if method == "voigt":
-                        depth, shape, fwhm = [theta["_".join([p, str(i)])] \
-                            for p in ("ld", "shape", "fwhm")]
-                        flux *= 1. - depth * utils.voigt(wavelength, fwhm, shape, dispersion)
-
-                    elif method == "gaussian":
-                        depth, sigma = [theta["_".join([p, str(i)])] \
-                            for p in ("ld", "sigma")]
-                        flux *= 1. - depth * utils.gaussian(wavelength, sigma, dispersion)
+                elif profile == "gaussian":
+                    depth, sigma = [theta["_".join([p, str(i)])] \
+                        for p in ("ld", "sigma")]
+                    if 0 > sigma: continue
+                    flux *= 1. - depth * utils.gaussian(wavelength, sigma, dispersion)
 
 
         # [TODO] No redshift modelling.
@@ -793,19 +762,21 @@ class SpectralChannel(Model):
 
         theta_dict = dict(zip(self.parameters, theta))
 
-        if not (1 > theta_dict.get("Po", 0.5) > 0) or 0 > theta_dict.get("Vo", 1):
+        if not (1 > theta_dict.get("Po", 0.5) > 0) \
+        or not (10000 > theta_dict.get("Vo", 1) > 0):
             return -np.inf
 
-        for i, (wavelength, species) in enumerate(self._configuration["balance"]["atomic_lines"]):
+        wavelength_tolerance = self.absorption_profile_kwargs["wavelength_tolerance"]
+        for i, (wavelength, species) in enumerate(self.config["balance"]["atomic_lines"]):
             if ("wl_{0}".format(i) in self.parameters \
-            and abs(wavelength - theta_dict["wl_{0}".format(i)]) > self.wavelength_tolerance) \
+            and abs(wavelength - theta_dict["wl_{0}".format(i)]) > wavelength_tolerance) \
             or not (1 >= theta_dict.get("ld_{0}".format(i), 0) >= 0) \
-            or 0 > theta_dict.get("sigma_{0}".format(i), 1) \
-            or 0 > theta_dict.get("fwhm_{0}".format(i), 1):
+            or not (1.0 >= theta_dict.get("sigma_{0}".format(i), 0.05) >= 0) \
+            or not (2.0 >= theta_dict.get("fwhm_{0}".format(i), 1) >= 0):
                 return -np.inf
         
         ln_prior = 0
-        for parameter, distribution in self._configuration.get("priors", {}).iteritems():
+        for parameter, distribution in self.config.get("priors", {}).iteritems():
             f = eval(distribution, _log_prior_eval_environment)
             ln_prior += f(theta_dict[parameter])
 
@@ -840,11 +811,11 @@ class SpectralChannel(Model):
         
         z = theta_dict.get("z", 0.)
         mask = self.mask(data.disp, z)
-
         chi_sq = (data.flux - expected)**2 * data.ivariance * mask
         
         if "Po" in theta_dict:
             Po, Vo, Yo = [theta_dict.get(each) for each in ("Po", "Vo", "Yo")]
+
             model_likelihood = -0.5 * (chi_sq - np.log(data.ivariance))
             outlier_ivariance = 1.0/(Vo + data.variance)
             outlier_likelihood = -0.5 * ((data.flux - Yo)**2 * outlier_ivariance \
@@ -935,6 +906,7 @@ class SpectralChannel(Model):
 
         initial_theta = {}
         if num_coefficients > 0:
+            z = 0. # [TODO]
             mask = np.isfinite(self.mask(data.disp, z))
             continuum_coefficients = np.polyfit(data.disp[mask],
                 data.flux[mask], num_coefficients)
@@ -956,7 +928,7 @@ class SpectralChannel(Model):
             initial_theta.update(dict(zip(
                 ["c_{0}_{1}".format(self.channel_index, j) for j in range(num_coefficients)],
                 continuum_coefficients)))
-            continuum = np.polyval(continuum_coefficients, self.data.disp)
+            continuum = np.polyval(continuum_coefficients, data.disp)
 
         else:
             continuum = 1.
@@ -1049,7 +1021,7 @@ class SpectralChannel(Model):
         if num_coefficients > 0:
             coefficients = [initial_theta["c_{0}_{1}".format(self.channel_index, k)] \
                 for k in range(num_coefficients)]
-            continuum = np.polyval(coefficients, self.data.disp)
+            continuum = np.polyval(coefficients, data.disp)
 
         else:
             continuum = 1.
@@ -1058,7 +1030,7 @@ class SpectralChannel(Model):
         processes = []
         threads = mp.cpu_count() if threads < 0 else threads
         pool = mp.Pool(threads)
-        for i, (wavelength, species) in enumerate(self._configuration["balance"]["atomic_lines"]):
+        for i, (wavelength, species) in enumerate(self.config["balance"]["atomic_lines"]):
             if "ld_{0}".format(i) in self.parameters:
                 
                 # Optimise the parameters of the absorption profile.
@@ -1074,27 +1046,29 @@ class SpectralChannel(Model):
         pool.close()
         pool.join()
 
-        """
-        import matplotlib.pyplot as plt
-        fig,ax = plt.subplots(figsize=(25, 4))
-        ax.plot(data.disp, data.flux, 'k')
-        model_spectra = self(dispersion=data.disp, **initial_theta)
-        ax.plot(model_spectra[:,0], model_spectra[:,1], 'b')
         
-
-        fig = plot.comparison([data], self, initial_theta)
-
         import matplotlib.pyplot as plt
-        raise a
-        """
+        
+        print("MODEL PARAMETERS")
+        print(self.parameters)
         
         posteriors, sampler, info = self.infer(data, np.array([initial_theta[p] for p in self.parameters]))
 
         ml_index = sampler.chain.reshape(-1, len(self.parameters))[sampler.lnprobability.flatten().argmax()]
-
         ml_values = dict(zip(self.parameters, ml_index))
-        model_spectra = self(dispersion=data.disp, **ml_values)
-        ax.plot(data.disp, model_spectra[:,1], 'r')
+
+        map_values = dict(zip(self.parameters, [posteriors[p][0] for p in self.parameters]))
+        
+        fig = plot.spectrum_comparison([data], self, initial_theta)
+        ml_spectra = self(dispersion=data.disp, **ml_values)
+        map_spectra = self(dispersion=data.disp, **map_values)
+
+        ax = fig.axes[0]
+        ax.plot(data.disp, ml_spectra[:,1], 'r', label='ML')
+        ax.plot(data.disp, map_spectra[:, 1], 'g', label='MAP')
+
+        from triangle import corner
+        figur = corner(sampler.chain.reshape(-1, len(self.parameters)), labels=self.parameters)
 
         raise a
 
@@ -1135,7 +1109,7 @@ class SpectralChannel(Model):
         return op_theta        
 
 
-    def infer(self, data, opt_theta, walkers=200, burn=200, sample=100, threads=24,
+    def infer(self, data, opt_theta, walkers=100, burn=900, sample=100, threads=24,
         **kwargs):
         """
         Infer the model parameters given the data.
@@ -1180,14 +1154,18 @@ class SpectralChannel(Model):
             chains and log-probability values for the burn-in and posterior.
         """
 
-        #stds = [std.get(parameter, 1e-8) for parameter in self.parameters]
-        p0 = [opt_theta + 1e-4*np.random.randn(len(self.parameters)) for i in range(walkers)]
-        
+        p0 = emcee.utils.sample_ball(opt_theta, [0.01]*len(opt_theta),
+            size=walkers)
+
+        #for i, parameter in enumerate(self.parameters):
+        #    if parameter.startswith("sigma_") or parameter.startswith("fwhm_") \
+        #    or parameter.startswith("Vo"):
+        #        p0[:, i] = np.abs(p0[:, i])
+
         sampler = emcee.EnsembleSampler(walkers, len(self.parameters),
             _inferencer, args=(self, data), threads=threads, **kwargs)
 
         mean_acceptance_fractions = np.zeros((burn + sample))
-
         for i, (pos, lnprob, rstate) in enumerate(sampler.sample(p0, \
             iterations=burn)):
             mean_acceptance_fractions[i] = np.mean(sampler.acceptance_fraction)
@@ -1340,7 +1318,7 @@ class StellarSpectrum(Model):
 
 
 
-        config = self._configuration["balance"]
+        config = self.config["balance"]
         
         for j in range(max_global_iterations):
 
@@ -1463,7 +1441,7 @@ class GenerativeModel(Model):
     def parameters(self):
         """ Return the model parameters. """
 
-        config = self._configuration
+        config = self.config
         any_channel_parameters = (config["model"]["continuum"] \
             or config["model"]["doppler_broadening"])
         if any_channel_parameters and 0 >= self._num_observed_channels:
@@ -1661,10 +1639,10 @@ class GenerativeModel(Model):
         self._num_observed_channels = len(data)
 
         # Any explicit initial guess information?
-        if "initial_guess" in self._configuration:
+        if "initial_guess" in self.config:
 
             sampled_filenames = {}
-            for parameter, rule in self._configuration["initial_guess"].iteritems():
+            for parameter, rule in self.config["initial_guess"].iteritems():
                 if parameter not in model.parameters: continue
 
                 # If we are drawing from a filename, then we need each parameter
@@ -1687,8 +1665,8 @@ class GenerativeModel(Model):
                     parameter_guess[parameter] = eval(rule, environment)
 
         # Any explicit prior distributions set?
-        if "priors" in self._configuration:
-            for parameter, rule in self._configuration["priors"].iteritems():
+        if "priors" in self.config:
+            for parameter, rule in self.config["priors"].iteritems():
                 if parameter in self.parameters \
                 and parameter not in parameter_guess:
                     parameter_guess[parameter] = eval(rule, environment)
@@ -1738,8 +1716,8 @@ class GenerativeModel(Model):
 
         z_parameter = "z" if "z" in remaining_parameters else \
             ("z_{0}" if "z_0" in remaining_parameters else False)
-        any_continuum = len(self._configuration["continuum"].get("order", [])) > 0 \
-            if hasattr(self._configuration, "continuum") else False
+        any_continuum = len(self.config["continuum"].get("order", [])) > 0 \
+            if hasattr(self.config, "continuum") else False
 
         # Remaining parameters could be related to:
         # tellurics, continuum, redshift.
@@ -1819,7 +1797,7 @@ class GenerativeModel(Model):
         theta_dict = dict(zip(self.parameters, theta))
 
         if not (1 > theta_dict.get("Po", 0.5) > 0) \
-        or 0 > theta_dict.get("Vo", 1) \
+        or not (10000 > theta_dict.get("Vo", 1) > 0) \
         or 0 > theta_dict.get("xi", 1) \
         or 0 > theta_dict.get("teff"):
             return -np.inf
@@ -1830,7 +1808,7 @@ class GenerativeModel(Model):
                 return -np.inf
         
         ln_prior = 0
-        for parameter, distribution in self._configuration.get("priors", {}).iteritems():
+        for parameter, distribution in self.config.get("priors", {}).iteritems():
             f = eval(distribution, _log_prior_eval_environment)
             ln_prior += f(theta_dict[parameter])
         return ln_prior
@@ -1955,8 +1933,8 @@ class GenerativeModel(Model):
             synth_kwargs = {}
 
         synth_kwargs.setdefault("chunk", True)
-        synth_kwargs.setdefault("threads", self._configuration["settings"].get(
-            "max_synth_threads", 1) if "settings" in self._configuration else 1)
+        synth_kwargs.setdefault("threads", self.config["settings"].get(
+            "max_synth_threads", 1) if "settings" in self.config else 1)
         synth_kwargs.setdefault("wavelength_steps",
             [(wls, wls, wls) for wls in [undersample_rate*np.median(np.diff(s.disp)) \
                 for s in data]])

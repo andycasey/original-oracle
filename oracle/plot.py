@@ -9,15 +9,15 @@ import numpy as np
 
 import specutils
 
-def comparison(observed_spectra, model, theta, figsize=None,
-    observed_color=u"k", model_color=u"b", mask_color=u"r", mask_alpha=0.5):
+def spectrum_comparison(data, model, theta, figsize=None, observed_color=u"k",
+    model_color=u"b", mask_color=u"r", mask_alpha=0.5):
     """
     Produce a comparison plot showing the observed and model spectra.
 
-    :param observed_spectra:
+    :param data:
         A single observed spectrum, or list of observed spectra.
 
-    :type observed_spectra:
+    :type data:
         :class:`specutils.Spectrum1D` object or a list of :class:`specutils.Spectrum1D`
         objects
 
@@ -41,35 +41,31 @@ def comparison(observed_spectra, model, theta, figsize=None,
         :class:`matplotlib.Figure`
     """
 
-    if isinstance(observed_spectra, specutils.Spectrum1D):
-        observed_spectra = [observed_spectra]
+    if isinstance(data, specutils.Spectrum1D):
+        data = [data]
 
-    K = len(observed_spectra)
+    K = len(data)
     if figsize is None:
-        figsize = (25, 4 * len(observed_spectra))
+        figsize = (25, 4 * len(data))
 
-    threads = model._configuration["settings"].get("max_synth_threads", 1) \
-        if "settings" in model._configuration else 1
-    try:
-        model_spectra = model(dispersions=[s.disp for s in observed_spectra],
-            synth_kwargs={"threads": threads}, **theta)
-    except:
-        model_spectra = [None] * K
+    model_spectra = [model(dispersion=[s.disp for s in data], **theta)]
 
     fig, axes = plt.subplots(K, figsize=figsize)
     axes = [axes] if K == 1 else axes
 
-    mask = np.array(model._configuration.get("mask", []))
+    mask = np.array(model.config.get("mask", []))
     # Redshift all mask wavelengths where necessary
     # [TODO] Need to allow for different redshifts in each channel.
     mask *= 1. + theta.get("z", 0)
 
     for ax, observed_spectrum, model_spectrum \
-    in zip(axes, observed_spectra, model_spectra):
+    in zip(axes, data, model_spectra):
 
         # Plot the spectra
         if model_spectrum is not None:
             ax.plot(model_spectrum[:, 0], model_spectrum[:, 1], model_color)
+        ax.errorbar(observed_spectrum.disp, observed_spectrum.flux,
+            yerr=observed_spectrum.variance**0.5, fmt=None, ecolor=observed_color)
         ax.plot(observed_spectrum.disp, observed_spectrum.flux, observed_color)
         
         # Show the mask
