@@ -9,8 +9,8 @@ import numpy as np
 
 import specutils
 
-def spectrum_comparison(data, model, theta, figsize=None, observed_color=u"k",
-    model_color=u"b", mask_color=u"r", mask_alpha=0.5):
+def spectrum_comparison(data, model, theta, figsize=None, plot_uncertainties=False,
+    observed_color=u"k", model_color=u"b", mask_color=u"r", mask_alpha=0.5):
     """
     Produce a comparison plot showing the observed and model spectra.
 
@@ -34,6 +34,20 @@ def spectrum_comparison(data, model, theta, figsize=None, observed_color=u"k",
     :type theta:
         dict
 
+    :param figsize: [optional]
+        A 2 length tuple (width, height) of the figure size in inches.
+
+    :type figsize:
+        tuple
+
+    :param plot_uncertainties: [optional]
+        Show the uncertainties in the observed data.
+
+    :type plot_uncertainties:
+        bool
+
+    [TODO]: other docs
+
     :returns:
         A spectrum comparison figure.
 
@@ -48,7 +62,18 @@ def spectrum_comparison(data, model, theta, figsize=None, observed_color=u"k",
     if figsize is None:
         figsize = (25, 4 * len(data))
 
-    model_spectra = [model(dispersion=[s.disp for s in data], **theta)]
+    # Use speedy synth kwargs if the model allows:
+    try:
+        synth_kwargs = model._get_speedy_synth_kwargs(data)
+
+    except:
+        synth_kwargs = {}
+
+    model_spectra = model(dispersion=[s.disp for s in data], 
+        synth_kwargs=synth_kwargs, **theta)
+
+    if not isinstance(model_spectra, list):
+        model_spectra = [model_spectra]
 
     fig, axes = plt.subplots(K, figsize=figsize)
     axes = [axes] if K == 1 else axes
@@ -64,8 +89,9 @@ def spectrum_comparison(data, model, theta, figsize=None, observed_color=u"k",
         # Plot the spectra
         if model_spectrum is not None:
             ax.plot(model_spectrum[:, 0], model_spectrum[:, 1], model_color)
-        ax.errorbar(observed_spectrum.disp, observed_spectrum.flux,
-            yerr=observed_spectrum.variance**0.5, fmt=None, ecolor=observed_color)
+        if plot_uncertainties:
+            ax.errorbar(observed_spectrum.disp, observed_spectrum.flux,
+                yerr=observed_spectrum.variance**0.5, fmt=None, ecolor=observed_color)
         ax.plot(observed_spectrum.disp, observed_spectrum.flux, observed_color)
         
         # Show the mask
