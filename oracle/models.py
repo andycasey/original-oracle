@@ -175,12 +175,18 @@ class Model(object):
             :class:`numpy.array`
         """
 
-        mask = np.ones(len(dispersion))
-        if self.config.get("masks", None) is not None:
-            for start, end in self.masks * (1. + z):
+        mask_regions = self.config.get("mask", None)
+        if mask_regions is not None:
+            mask = np.ones(len(dispersion))
+            mask_regions = np.array(mask_regions)
+            for start, end in mask_regions * (1. + z):
                 indices = dispersion.searchsorted([start, end])
                 mask[indices[0]:indices[1] + 1] = fill_value
-        return mask
+
+            return mask
+
+        else:
+            return 1.
 
 
 def _optimiser(_class, *args):
@@ -717,28 +723,30 @@ class SpectralChannel(Model):
             op_theta = dict(zip(self.parameters, op_x))
 
             opt_spectra = self(dispersion=data.disp, **op_theta)
-            ax.plot(data.disp, opt_spectra[:,1], 'r', label='opt')
+            ax.plot(data.disp, opt_spectra[:,1], 'g', label='opt')
 
         else:
             op_x = [pre_opt_theta.get(parameter) for parameter in self.parameters]
 
 
-        opt_spectra = self(dispersion=data.disp, **pre_opt_theta)
-        ax.plot(data.disp, opt_spectra[:,1], 'g', label='pre-opt')
         
 
 
         ax = fig.axes[0]
         posteriors, sampler, info = self.infer(data, op_x)
 
+        
         ml_index = sampler.chain.reshape(-1, len(self.parameters))[sampler.lnprobability.flatten().argmax()]
         ml_values = dict(zip(self.parameters, ml_index))
         map_values = dict(zip(self.parameters, [posteriors[p][0] for p in self.parameters]))
         
         ml_spectra = self(dispersion=data.disp, **ml_values)
         map_spectra = self(dispersion=data.disp, **map_values)
-        ax.plot(data.disp, ml_spectra[:,1], 'g', label='ML')
-        ax.plot(data.disp, map_spectra[:, 1], 'm', label='MAP')
+        #ax.plot(data.disp, ml_spectra[:,1], 'g', label='ML')
+        ax.plot(data.disp, ml_spectra[:, 1], 'r', label='ML')
+
+        
+
 
         #from triangle import corner
         #figur = corner(sampler.chain.reshape(-1, len(self.parameters)), labels=self.parameters)
@@ -805,7 +813,7 @@ class SpectralChannel(Model):
 
         return clipped_theta
 
-    def infer(self, data, opt_theta, walkers=150, burn=400, sample=100, threads=24,
+    def infer(self, data, opt_theta, walkers=50, burn=400, sample=100, threads=24,
         **kwargs):
         """
         Infer the model parameters given the data.
@@ -849,6 +857,8 @@ class SpectralChannel(Model):
             and a ``dict`` containing the mean acceptance fractions, concatenated
             chains and log-probability values for the burn-in and posterior.
         """
+
+        assert len(self.parameters) > 0
 
         walkers = walkers if walkers > 0 else 2*len(opt_theta)
 
@@ -1561,6 +1571,7 @@ class GenerativeModel(Model):
             # SI fell over, so we will too.
             # This is OK though: if *all* walkers fell over simultaneously then
             # we would still end up raising an exception
+            raise a
             return -np.inf
 
         else:
