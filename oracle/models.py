@@ -322,7 +322,6 @@ class SpectralChannel(Model):
                 shape = theta["shape_{0}".format(i)]
                 wavelength = theta.get("wl_{0}".format(i), wavelength)
 
-<<<<<<< HEAD
                 # Over what dispersion do we care?
                 indices = dispersion.searchsorted([
                     wavelength - 1, 
@@ -331,40 +330,7 @@ class SpectralChannel(Model):
                 x, y = dispersion.__getslice__(*indices), flux.__getslice__(*indices)
                 flux.__setslice__(indices[0], indices[1],
                     y * (1 - depth * profiles.voigt(wavelength, sigma, shape,x)))
-=======
-                args = [wavelength]
-                if profile == "voigt":
-                    depth, shape, fwhm = [theta["_".join([p, str(i)])] \
-                        for p in ("ld", "shape", "fwhm")]
-                    if 0 > depth: continue
-                    width = 5. * fwhm / 2.355
-                    args.extend([fwhm, shape])
 
-                elif profile == "gaussian":
-                    depth, sigma = [theta["_".join([p, str(i)])] \
-                        for p in ("ld", "sigma")]
-                    if 0 > depth: continue
-                    width = 5. * sigma
-                    args.append(sigma)
-
-                # Over what dispersion do we care?
-                indices = dispersion.searchsorted([
-                    wavelength - width,
-                    wavelength + width
-                ])
-                x, y = dispersion.__getslice__(*indices), flux.__getslice__(*indices)
-                args.append(x)
-
-                if profile == "gaussian":
-                    flux.__setslice__(indices[0], indices[1],
-                        y * (1. - depth * utils.gaussian(*args)))
-
-
-                elif profile == "voigt":
-                    flux.__setslice__(indices[0], indices[1],
-                        y * (1. - depth * utils.voigt(*args)))
-
->>>>>>> 14db79a2e07755db04cd113dcbacb53b123f4278
 
         # [TODO] No redshift modelling.
         return np.vstack([dispersion, flux]).T
@@ -394,25 +360,12 @@ class SpectralChannel(Model):
             return -np.inf
 
         for i, (wavelength, species) in enumerate(self.config["balance"]["atomic_lines"]):
-<<<<<<< HEAD
             #if ("wl_{0}".format(i) in self.parameters \
             #and abs(wavelength - theta_dict["wl_{0}".format(i)]) > wavelength_tolerance) \
             if not (1 >= theta_dict.get("ld_{0}".format(i), 0) >= -1) \
             or not (1 >= theta_dict.get("shape_{0}".format(i), 0.5) >= 0) \
             or not (1 >= theta_dict.get("sigma_{0}".format(i), 0.5) > 0):
-=======
-            if ("wl_{0}".format(i) in self.parameters \
-            and abs(wavelength - theta_dict["wl_{0}".format(i)]) > wavelength_tolerance):
-                return -np.inf
 
-            if not (1 >= theta_dict.get("ld_{0}".format(i), 0) >= -1):
-                return -np.inf
-
-            if not (1.0 >= theta_dict.get("sigma_{0}".format(i), 0.05) > 0):
-                return -np.inf
-
-            if not (2.0 >= theta_dict.get("fwhm_{0}".format(i), 1) > 0):
->>>>>>> 14db79a2e07755db04cd113dcbacb53b123f4278
                 return -np.inf
         
         ln_prior = 0
@@ -465,15 +418,9 @@ class SpectralChannel(Model):
                 np.log(Po)      + outlier_likelihood)
 
         else:
-<<<<<<< HEAD
             likelihood = stellar_likelihood
         
         finite = np.isfinite(likelihood)
-=======
-            likelihood = -0.5 * chi_sq
-            finite = np.isfinite(likelihood)
-
->>>>>>> 14db79a2e07755db04cd113dcbacb53b123f4278
         if finite.sum() == 0:
             raise RuntimeError("no observed pixels used to calculate likelihood"\
                 " -- are all of your pixels masked?")
@@ -726,10 +673,7 @@ class SpectralChannel(Model):
         
         pool.close()
         pool.join()
-<<<<<<< HEAD
         
-=======
->>>>>>> 14db79a2e07755db04cd113dcbacb53b123f4278
 
         # If some optimisation failed and those values are at the edge of what
         # is acceptable, then we will need to alter those values. If we don't,
@@ -737,11 +681,7 @@ class SpectralChannel(Model):
         # is allowed by the priors. For each parameter that has an initial value
         # on the edge of what's allowed, we will lose 50% of the walkers.
 
-<<<<<<< HEAD
         #initial_theta = self._clip_points_for_sampling(initial_theta)
-=======
-        initial_theta = self._clip_points_for_sampling(initial_theta)
->>>>>>> 14db79a2e07755db04cd113dcbacb53b123f4278
 
 
         import matplotlib.pyplot as plt
@@ -753,7 +693,6 @@ class SpectralChannel(Model):
         print(self.parameters)
 
         fig = plot.spectrum_comparison([data], self, initial_theta)
-<<<<<<< HEAD
         ax = fig.axes[0]
         
 
@@ -792,11 +731,6 @@ class SpectralChannel(Model):
         ax = fig.axes[0]
         posteriors, sampler, info = self.infer(data, op_x)
 
-=======
-
-        posteriors, sampler, info = self.infer(data, np.array([initial_theta[p] for p in self.parameters]))
->>>>>>> 14db79a2e07755db04cd113dcbacb53b123f4278
-
         ml_index = sampler.chain.reshape(-1, len(self.parameters))[sampler.lnprobability.flatten().argmax()]
         ml_values = dict(zip(self.parameters, ml_index))
         map_values = dict(zip(self.parameters, [posteriors[p][0] for p in self.parameters]))
@@ -809,12 +743,7 @@ class SpectralChannel(Model):
         #from triangle import corner
         #figur = corner(sampler.chain.reshape(-1, len(self.parameters)), labels=self.parameters)
 
-<<<<<<< HEAD
         fig2 = plot.projection(sampler, self, [data], n=100)
-=======
-        #from triangle import corner
-        #figur = corner(sampler.chain.reshape(-1, len(self.parameters)), labels=self.parameters)
->>>>>>> 14db79a2e07755db04cd113dcbacb53b123f4278
 
         raise a
 
@@ -839,10 +768,7 @@ class SpectralChannel(Model):
         if full_output:
             return (op_theta, op_fopt, op_niter, op_funcalls, op_warnflag)
         return op_theta
-<<<<<<< HEAD
-=======
 
->>>>>>> 14db79a2e07755db04cd113dcbacb53b123f4278
 
     def _clip_points_for_sampling(self, theta, tolerance=0.01):
         """
@@ -879,13 +805,7 @@ class SpectralChannel(Model):
 
         return clipped_theta
 
-<<<<<<< HEAD
     def infer(self, data, opt_theta, walkers=150, burn=400, sample=100, threads=24,
-=======
-
-
-    def infer(self, data, opt_theta, walkers=200, burn=900, sample=100, threads=24,
->>>>>>> 14db79a2e07755db04cd113dcbacb53b123f4278
         **kwargs):
         """
         Infer the model parameters given the data.
@@ -932,11 +852,7 @@ class SpectralChannel(Model):
 
         walkers = walkers if walkers > 0 else 2*len(opt_theta)
 
-<<<<<<< HEAD
         p0 = emcee.utils.sample_ball(opt_theta, [1e-3]*len(opt_theta),
-=======
-        p0 = emcee.utils.sample_ball(opt_theta, [1e-4]*len(opt_theta),
->>>>>>> 14db79a2e07755db04cd113dcbacb53b123f4278
             size=walkers)
 
         p0_orig = p0.copy()
