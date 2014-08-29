@@ -447,7 +447,8 @@ class instance(object):
 
     def __exit__(self, exit_type, value, traceback):
         # Remove the temporary working directory and any files in it.
-        if exit_type not in (IOError, SIException) and not self.debug:
+        #if exit_type not in (IOError, SIException) and not self.debug:
+        if not self.debug:
             shutil.rmtree(self.twd)
         else:
             logger.info("Temporary directory {0} has been kept to allow debugging"
