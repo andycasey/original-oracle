@@ -37,7 +37,7 @@ if "install" in sys.argv:
     if "skip-si" not in map(str.lower, sys.argv):
         # Check for ifort
         print("Checking for ifort compiler..")
-        if os.system("which ifort") > 0:
+        if subprocess.call("which ifort", shell=True, env=os.environ.copy()) > 0:
             raise Exception("No ifort compiler found. Please download the trial "\
                 "version from https://software.intel.com/en-us/intel-fortran-compo"\
                 "ser-xe-evaluation-options")
@@ -46,12 +46,13 @@ if "install" in sys.argv:
         print("Installing SI..")
         cwd = os.path.join(os.path.dirname(os.path.abspath(
             os.path.expanduser(__file__))), "si/code")
-        installer = subprocess.call("make", cwd=cwd, shell=True)
+        installer = subprocess.call("make", cwd=cwd, shell=True,
+            env=os.environ.copy())
         if installer != 0:
             raise Exception("SI fortran code could not be compiled")
 
     else:
-        print("Skipping SI installation")
+        print("Skipping SI installation..")
         sys.argv.remove("skip-si")
 
 setup(name="oracle",
