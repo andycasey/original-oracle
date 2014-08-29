@@ -119,12 +119,13 @@ class instance(object):
         def alarm_handler(signum, frame):
             raise Alarm
 
-        default_env = {
-            "PATH": os.getenv("PATH"),
-            # We will make this relative to __file__ until we can remove
-            # all instances of SIU_MAIN in the fortran code itself.
-            "SIU_MAIN": os.path.abspath(os.path.join(os.path.dirname(os.path.expanduser(__file__)), "../si")) 
-        }
+        default_env = {}
+        default_env.update(os.environ.copy())
+        # We will make this relative to __file__ until we can remove
+        # all instances of SIU_MAIN in the fortran code itself.
+        default_env["SIU_MAIN"] = os.path.abspath(
+            os.path.join(os.path.dirname(os.path.expanduser(__file__)), "../si"))
+        
         if env is not None:
             default_env.update(env)
 
