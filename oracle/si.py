@@ -21,7 +21,7 @@ from utils import atomic_number
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("si")
 
-class SIException(BaseException):
+class SIException(Exception):
     pass
 
 class instance(object):
@@ -85,7 +85,7 @@ class instance(object):
         return self
 
 
-    def execute(self, filename="fort.10", timeout=30, shell=False, env=None):
+    def execute(self, filename="fort.10", timeout=60, shell=False, env=None):
         """
         Execute SI with the input filename.
         
@@ -301,7 +301,6 @@ class instance(object):
                 synthetic_spectra = np.loadtxt(os.path.join(self.twd, "fort.14"))
 
             except IOError:
-                return None
                 logger.warn("No synthetic spectra found in {0}:".format(
                     os.path.join(self.twd, "fort.14")))
                 logger.warn("SI output (code {0}):\n{1}\n{2}".format(
@@ -310,7 +309,6 @@ class instance(object):
                     os.path.join(self.twd, "fort.14")))
 
             if len(synthetic_spectra) == 0:
-                return None
                 logger.warn("No synthetic spectra found in {0}:".format(
                     os.path.join(self.twd, "fort.14")))
                 logger.warn("SI output (code {0}):\n{1}\n{2}".format(
@@ -426,7 +424,6 @@ class instance(object):
             spectrum = np.loadtxt(os.path.join(self.twd, "fort.14"))
 
         except IOError:
-            return None
             logger.warn("No synthetic spectra found in {0}:".format(
                 os.path.join(self.twd, "fort.14")))
             logger.warn("SI output (code {0}):\n{1}\n{2}".format(
@@ -435,7 +432,6 @@ class instance(object):
                 os.path.join(self.twd, "fort.14")))
 
         if len(spectrum) == 0:
-            return None
             logger.warn("No synthetic spectra found in {0}:".format(
                 os.path.join(self.twd, "fort.14")))
             logger.warn("SI output (code {0}):\n{1}\n{2}".format(
@@ -450,8 +446,7 @@ class instance(object):
 
     def __exit__(self, exit_type, value, traceback):
         # Remove the temporary working directory and any files in it.
-        #if exit_type not in (IOError, SIException) and not self.debug:
-        if not self.debug:
+        if exit_type not in (IOError, SIException) and not self.debug:
             shutil.rmtree(self.twd)
         else:
             logger.info("Temporary directory {0} has been kept to allow debugging"
@@ -722,7 +717,6 @@ def synthesise(teff, logg, metallicity, xi, wavelengths,
             stdouts.append(stdout)
 
             if len(spectrum) == 0:
-                return None
                 raise SIException("no fluxes found in spectrum chunk")
 
             if chunk:
