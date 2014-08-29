@@ -177,7 +177,8 @@ c     *      STATUS = 'OLD',READONLY)
 c       WRITE(*,*) 'Background opacity taken from: ', 
 c     *             env(1:env_len)//'/'//RBF_FILE
 c
-       OPEN(UNIT=24,FILE='/data/mbergema/siu/ewgrid/code/f/'
+       env_len = igetenv('SIU_MAIN',env)
+       OPEN(UNIT=24,FILE=env(1:env_len)//'/code/'
      *      //RBF_FILE,
      *      STATUS = 'OLD',READONLY)
        WRITE(*,*) 'Background opacity taken from: ', 
