@@ -1636,7 +1636,7 @@ class GenerativeModel(Model):
         return log_probability
 
 
-    def _get_speedy_synth_kwargs(self, data, synth_kwargs=None, undersample_rate=10):
+    def _get_speedy_synth_kwargs(self, data, synth_kwargs=None, undersample_rate=1):
         """ Get default synth_kwargs that are optimised for speediness. """
 
         if synth_kwargs is None:

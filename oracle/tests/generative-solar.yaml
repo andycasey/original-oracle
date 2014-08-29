@@ -233,8 +233,8 @@ settings:
 # - [7891.616, 7900.000]
 
 
-#priors:
-#  teff: normal(5800, 150)
+priors:
+  teff: normal(5800, 150)
 
 sampler:
   walkers: 200
