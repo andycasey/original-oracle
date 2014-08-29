@@ -23,6 +23,7 @@ import plot
 import si
 import specutils
 
+import profiles
 import utils
 
 __all__ = ["Star", "StellarSpectrum", "GenerativeModel"]
@@ -41,392 +42,6 @@ _log_prior_eval_environment = {
     "uniform": lambda a, b: partial(stats.uniform.logpdf, **{"loc": a, "scale": b - a}),
     "normal": lambda a, b: partial(stats.norm.logpdf, **{"loc": a, "scale": b})
 }
-
-class AbsorptionProfile(object):
-
-    def __init__(self, wavelength, profile="gaussian", mask=None, outliers=False,
-        wavelength_tolerance=0.0, wavelength_contribution=0.5):
-        """
-        Model an absorption profile in a spectrum.
-
-        :param wavelength:
-            Approximate wavelength of the absorption feature.
-
-        :type wavelength:
-            float
-
-        :param profile: [optional]
-            The type of profile to use. Available profiles are Gaussian or Voigt.
-
-        :type profile:
-            str
-
-        :param mask: [optional]
-            A mask to use for the observed channel. This should be of the same
-            length as the observed data points.
-
-        :type mask:
-            :class:`numpy.array`
-
-        :param outliers: [optional]
-            Model outlier pixels with a Gaussian mixture model.
-
-        :type outliers:
-            bool
-
-        :wavelength_tolerance: [optional]
-            Allow some tolerance in the exact rest wavelength of the absorption
-            profile. If set to zero, no tolerance is allowed.
-
-        :type wavelength_tolerance:
-            float
-
-        :wavelength_contribution: [optional]
-            The spectral region to consider around the absorption feature. This
-            must be a positive quantity.
-
-        :type wavelength_contribution:
-            float
-
-        :param upper_smoothing_sigma: [optional]
-            The upper limit allowed for the Gaussian full-width half-maximum of
-            the absorption profile. Set as 0 for no limit.
-
-        :type upper_smoothing_sigma:
-            float
-
-        :raises ValueError:
-            If the ``profile`` specified is not Voigt or Gaussian, or if the 
-            ``wavelength_tolerance``, ``wavelength_contribution`` values are negative.
-        """
-
-        self.profile = profile.lower()
-        if self.profile not in ("gaussian", "voigt"):
-            raise ValueError("profile must be either Gaussian or Voigt")
-
-        if 0 > wavelength_tolerance:
-            raise ValueError("wavelength tolerance must be a positive quantity")
-
-        if 0 > wavelength_contribution:
-            raise ValueError("wavelength contribution must be a positive quantity")
-
-        self.mask = mask if mask is not None else 1.
-        self.outliers = outliers
-        self.approx_wavelength = wavelength
-        self.wavelength_tolerance = wavelength_tolerance
-        self.wavelength_contribution = wavelength_contribution        
-        return None
-
-
-    @property
-    def parameters(self):
-        """ Return the model parameters. """
-
-        parameters = ["ld"]
-        if self.profile == "voigt":
-            parameters.extend(["fwhm", "shape"])
-        elif self.profile == "gaussian":
-            parameters.append("sigma")
-
-        if self.wavelength_tolerance > 0:
-            parameters.append("wl")
-        if self.outliers:
-            parameters.extend(["Po", "Vo", "Yo"])
-        return parameters
-
-
-    def __call__(self, dispersion, continuum=1., **theta):
-        """
-        Return the continuum with the absorption profile for the given theta.
-
-        :param dispersion:
-            The dispersion array to calculate the spectrum for.
-
-        :type dispersion:
-            :class:`numpy.array`
-
-        :param continuum: [optional]
-            The continuum for the spectrum. Defaults to unity at all points.
-
-        :type continuum:
-            :class:`numpy.array` or float
-
-        :param theta:
-            The model parameters (keys) and their values.
-
-        :type theta:
-            dict
-
-        :returns:
-            An array containing the dispersion and continuum with the requested
-            absorption profile.
-
-        :rtype:
-            :class:`numpy.array`
-        """
-
-        wavelength = theta.get("wl", self.approx_wavelength)
-        if self.profile == "voigt":
-            depth, shape, fwhm = [theta[p] for p in ("ld", "shape", "fwhm")]
-            flux = continuum * (1. - depth * utils.voigt(wavelength, fwhm, shape,
-                dispersion))
-        elif self.profile == "gaussian":
-            depth, sigma = theta["ld"], theta["sigma"]
-            flux = continuum * (1. - depth * utils.gaussian(wavelength, sigma,
-                dispersion))
-        return np.vstack([dispersion, flux]).T
-
-
-    def _log_prior(self, theta):
-        """
-        Return the logarithmic prior probability of the parameters ``theta``.
-
-        :param theta:
-            The values of the ``model.parameters``.
-
-        :type theta:
-            list-type
-
-        :returns:
-            The logarithmic prior probability given the parameters ``theta``.
-
-        :rtype:
-            float
-        """
-
-        theta_dict = dict(zip(self.parameters, theta))
-        if (self.wavelength_tolerance > 0 \
-        and abs(self.approx_wavelength - theta_dict["wl"]) > self.wavelength_tolerance) \
-        or not (1 > theta_dict.get("Po", 0.5) > 0) \
-        or not (10000 > theta_dict.get("Vo", 1) > 0) \
-        or not (1 >= theta_dict.get("ld", 0.5) >= 0):
-            #or not (0.5 > theta_dict.get("sigma", 0.0) >= 0) \
-            #or not (1.0 > theta_dict.get("fwhm", 0.0) >= 0):
-            return -np.inf
-
-        # It doesn't make a *lot* of sense allowing priors for individual parameters
-        # in the AbsorptionProfile model, but we can come back to this.
-        # [TODO]
-        #ln_prior = 0
-        #for parameter, distribution in self.config.get("priors", {}).iteritems():
-        #    f = eval(distribution, _log_prior_eval_environment)
-        #    ln_prior += f(theta_dict[parameter])
-        return 0
-
-
-    def _log_likelihood(self, theta, data, continuum):
-        """
-        Return the logarithmic likelihood of the parameters ``theta``.
-
-        :param theta:
-            The values of the ``model.parameters``.
-
-        :type theta:
-            list-type
-
-        :param data:
-            The observed data.
-
-        :type data:
-            :class:`specutils.Spectrum1D`
-
-        :param continuum:
-            The continuum shape to apply.
-
-        :type continuum:
-            float or :class:`numpy.array` with the same length as ``data``
-
-        :returns:
-            The logarithmic likelihood of the parameters ``theta``.
-
-        :rtype:
-            float
-        """
-
-        theta_dict = dict(zip(self.parameters, theta))
-        expected = self(dispersion=data.disp,
-            continuum=continuum, **theta_dict)[:, 1]
-
-        # Build an extra mask if only nearby points contribute to the model.
-        if self.wavelength_contribution > 0:
-            wavelength = theta_dict.get("wl", self.approx_wavelength)
-            indices = data.disp.searchsorted([
-                wavelength - self.wavelength_contribution,
-                wavelength + self.wavelength_contribution
-            ])
-            additional_mask = np.array([np.nan]*len(data.disp))
-            additional_mask[indices[0]:indices[1]] = 1.
-        
-        else:
-            additional_mask = 1.
-
-        total_mask = self.mask * additional_mask
-        chi_sq = (data.flux - expected)**2 * data.ivariance * total_mask
-        
-        if not self.outliers:
-            likelihood = -0.5 * chi_sq
-            finite = np.isfinite(chi_sq)
-
-        else:
-            Po, Vo, Yo = [theta_dict.get(each) for each in ("Po", "Vo", "Yo")]
-            model_likelihood = -0.5 * (chi_sq - np.log(data.ivariance))
-            outlier_ivariance = 1.0/(Vo + data.variance)
-            outlier_likelihood = -0.5 * ((data.flux - Yo)**2 * outlier_ivariance \
-                * total_mask - np.log(outlier_ivariance))
-            likelihood = np.logaddexp(
-                np.log(1. - Po) + model_likelihood,
-                np.log(Po)      + outlier_likelihood)
-            finite = np.isfinite(likelihood)
-
-        return likelihood[finite].sum()
-
-
-    def _log_probability(self, theta, data, continuum):
-        """
-        Return the logarithmic probability of the model parameters ``theta``.
-
-        :param theta:
-            The values of the ``model.parameters``.
-
-        :type theta:
-            list-type
-
-        :param data:
-            The observed data.
-
-        :type data:
-            :class:`specutils.Spectrum1D`
-
-        :param continuum:
-            The continuum shape to apply.
-
-        :type continuum:
-            float or :class:`numpy.array` with the same length as ``data``
-
-        :returns:
-            The logarithmic probability of the parameters ``theta``.
-
-        :rtype:
-            float
-        """
-
-        log_prior = self._log_prior(theta)
-        if not np.isfinite(log_prior):
-            return log_prior
-        return log_prior + self._log_likelihood(theta, data, continuum)
-        
-
-    def initial_guess(self, data, continuum):
-        """
-        Return an initial guess for the model parameters.
-
-        :param data:
-            The observed data.
-
-        :type data:
-            :class:`specutils.Spectrum1D`
-
-        :returns:
-            An initial guess for the model parameters.
-
-        :rtype:
-            dict
-        """
-
-        index = data.disp.searchsorted(self.approx_wavelength)
-        continuum_at_line = continuum if isinstance(continuum, (int, float)) \
-            else continuum[index]
-
-        theta = {
-            "wl": self.approx_wavelength,
-            "ld": 1.0 - data.flux[index]/continuum_at_line,
-            "fwhm": 0.10,
-            "sigma": 0.05,
-            "shape": 0.,
-            "Po": 0.9,
-            "Vo": 0.01,
-            "Yo": np.median(continuum)
-        }
-        return dict(zip(self.parameters, [theta[p] for p in self.parameters]))
-
-
-    def optimise(self, data, continuum, maxfun=10e3, maxiter=10e3, xtol=1e-12,
-        ftol=1e-12, full_output=False):
-        """
-        Optimise the model parameters given the data.
-
-        :param data:
-            The observed data.
-
-        :type data:
-            :class:`specutils.Spectrum1D`
-
-        :param continuum:
-            The continuum shape to apply.
-
-        :type continuum:
-            float or :class:`numpy.array` with the same length as ``data``
-
-        :param maxfun: [optional]
-            The maximum number of function evaluations to perform.
-
-        :type maxfun:
-            int
-
-        :param maxiter: [optional]
-            The maximum number of function iterations to perform.
-
-        :type maxiter:
-            int
-
-        :param xtol: [optional]
-            The tolerance required in the model parameters.
-
-        :type xtol:
-            float
-
-        :param ftol: [optional]
-            The tolerance required in logarithmic probability.
-
-        :type xtol:
-            float
-
-        :param full_output: [optional]
-            Return a tuple containing the optimised points theta, the logarithmic
-            probability of the optimised point, the number of function iterations,
-            the number of function evaluations, and an integer warning flag.
-
-        :type full_output:
-            bool
-
-        :returns:
-            The optimised model parameters.
-        """
-
-        initial_theta = self.initial_guess(data, continuum)
-        op_kwargs = {
-            "maxfun": maxfun,
-            "maxiter": maxiter,
-            "xtol": xtol,
-            "ftol": ftol,
-            "disp": False,
-            "full_output": True # Necessary for introspection and provenance.
-        }
-        
-        t_init = time()
-        op_theta, op_fopt, op_niter, op_nfunc, op_warnflag = op.fmin(
-            lambda t, d, c: -self._log_probability(t, d, c),
-            [initial_theta[p] for p in self.parameters],
-            args=(data, continuum), **op_kwargs)
-        Model._opt_warn_message(op_warnflag, op_niter, op_nfunc)
-
-        t_elapsed = time() - t_init
-        logger.info("Optimisation took {0:.2f} seconds".format(t_elapsed))
-
-        if full_output:
-            return (op_theta, op_fopt, op_niter, op_funcalls, op_warnflag)
-        return op_theta
-
 
 class Model(object):
 
@@ -463,11 +78,6 @@ class Model(object):
 
         # Check the configuration is valid.
         self._validate()
-
-        # Set the masks.
-        self.masks = np.array(self.config["mask"]) \
-            if "mask" in self.config else None
-
         return None
 
 
@@ -565,7 +175,7 @@ class Model(object):
         """
 
         mask = np.ones(len(dispersion))
-        if self.masks is not None:
+        if self.config.get("masks", None) is not None:
             for start, end in self.masks * (1. + z):
                 indices = dispersion.searchsorted([start, end])
                 mask[indices[0]:indices[1] + 1] = fill_value
@@ -583,8 +193,7 @@ def _inferencer(theta, _class, *args):
 class SpectralChannel(Model):
 
     
-    def __init__(self, configuration, channel_index,
-        absorption_profile_kwargs=None):
+    def __init__(self, configuration, channel_index):
         """
         A class to model a stellar spectrum with a combination of continuum and
         absorption profiles. No spectra are synthesised in this model.
@@ -604,26 +213,11 @@ class SpectralChannel(Model):
         :type channel_index:
             integer or str
 
-        :param absorption_profile_kwargs: [optional]
-            Keywords to pass directly to :class:`AbsorptionProfile`.
-
-        :type absorption_profile_kwargs:
-            dict
         """
 
         super(SpectralChannel, self).__init__(configuration)
         self._data = None
         self.channel_index = channel_index
-
-        self.absorption_profile_kwargs = absorption_profile_kwargs \
-            if absorption_profile_kwargs is not None else {}
-
-        fake_transition = AbsorptionProfile(0)
-        keywords = ("profile", "wavelength_tolerance", "wavelength_contribution")
-        for keyword in keywords:
-            self.absorption_profile_kwargs.setdefault(keyword,
-                self.config["balance"].get(
-                    keyword, getattr(fake_transition, keyword)))
         return None
 
 
@@ -653,17 +247,14 @@ class SpectralChannel(Model):
         if config["model"]["outliers"]:
             parameters.extend(["Po", "Vo", "Yo"])
 
-        # Get absorption profile parameters for each transition in this channel.
-        absorption_profile_parameters = set(AbsorptionProfile(0,
-            **self.absorption_profile_kwargs).parameters).difference(["Po", "Vo", "Yo"])
-        
         # We can't get the exact model parameters unless we know the observed
         # dispersion range.
+        transition_parameters = ("shape", "ld", "sigma")
         for i, (wavelength, species) in enumerate(config["balance"]["atomic_lines"]):
             if self._data is None \
             or (self._data.disp[-1] >= wavelength >= self._data.disp[0]):
                 parameters.extend(["{0}_{1}".format(each, i) \
-                    for each in absorption_profile_parameters])
+                    for each in transition_parameters])
 
         if self._data is not None:
             self._parameters = parameters
@@ -706,6 +297,9 @@ class SpectralChannel(Model):
         :rtype:
             :class:`numpy.array`
         """
+
+        if isinstance(dispersion, (list, tuple)):
+            dispersion = dispersion[0]
         
         num_coefficients = self._get_num_coefficients()
 
@@ -719,25 +313,22 @@ class SpectralChannel(Model):
             flux = np.ones(len(dispersion))
 
         # Model the absorption profiles!
-        profile = self.absorption_profile_kwargs["profile"]
-        wavelength_contribution = self.absorption_profile_kwargs["wavelength_contribution"]
         for i, (wavelength, species) in enumerate(self.config["balance"]["atomic_lines"]):
-            # Should we be modelling this line?
-            if "ld_{0}".format(i) in self.parameters:
+            # Negative depth means don't model the line.
+            depth = theta.get("ld_{0}".format(i), -1)
+            if depth > 0: 
+                sigma = theta["sigma_{0}".format(i)]
+                shape = theta["shape_{0}".format(i)]
                 wavelength = theta.get("wl_{0}".format(i), wavelength)
 
-                if profile == "voigt":
-                    depth, shape, fwhm = [theta["_".join([p, str(i)])] \
-                        for p in ("ld", "shape", "fwhm")]
-                    if 0 > fwhm: continue
-                    flux *= 1. - depth * utils.voigt(wavelength, fwhm, shape, dispersion)
-
-                elif profile == "gaussian":
-                    depth, sigma = [theta["_".join([p, str(i)])] \
-                        for p in ("ld", "sigma")]
-                    if 0 > sigma: continue
-                    flux *= 1. - depth * utils.gaussian(wavelength, sigma, dispersion)
-
+                # Over what dispersion do we care?
+                indices = dispersion.searchsorted([
+                    wavelength - 1, 
+                    wavelength + 1
+                ])
+                x, y = dispersion.__getslice__(*indices), flux.__getslice__(*indices)
+                flux.__setslice__(indices[0], indices[1],
+                    y * (1 - depth * profiles.voigt(wavelength, sigma, shape,x)))
 
         # [TODO] No redshift modelling.
         return np.vstack([dispersion, flux]).T
@@ -763,16 +354,15 @@ class SpectralChannel(Model):
         theta_dict = dict(zip(self.parameters, theta))
 
         if not (1 > theta_dict.get("Po", 0.5) > 0) \
-        or not (10000 > theta_dict.get("Vo", 1) > 0):
+        or not (10 > theta_dict.get("Vo", 1) > 0):
             return -np.inf
 
-        wavelength_tolerance = self.absorption_profile_kwargs["wavelength_tolerance"]
         for i, (wavelength, species) in enumerate(self.config["balance"]["atomic_lines"]):
-            if ("wl_{0}".format(i) in self.parameters \
-            and abs(wavelength - theta_dict["wl_{0}".format(i)]) > wavelength_tolerance) \
-            or not (1 >= theta_dict.get("ld_{0}".format(i), 0) >= 0) \
-            or not (1.0 >= theta_dict.get("sigma_{0}".format(i), 0.05) >= 0) \
-            or not (2.0 >= theta_dict.get("fwhm_{0}".format(i), 1) >= 0):
+            #if ("wl_{0}".format(i) in self.parameters \
+            #and abs(wavelength - theta_dict["wl_{0}".format(i)]) > wavelength_tolerance) \
+            if not (1 >= theta_dict.get("ld_{0}".format(i), 0) >= -1) \
+            or not (1 >= theta_dict.get("shape_{0}".format(i), 0.5) >= 0) \
+            or not (1 >= theta_dict.get("sigma_{0}".format(i), 0.5) > 0):
                 return -np.inf
         
         ln_prior = 0
@@ -809,29 +399,33 @@ class SpectralChannel(Model):
         theta_dict = dict(zip(self.parameters, theta))
         expected = self(dispersion=data.disp, **theta_dict)[:, 1]
         
-        z = theta_dict.get("z", 0.)
-        mask = self.mask(data.disp, z)
+        mask = self.mask(data.disp, theta_dict.get("z", 0))
         chi_sq = (data.flux - expected)**2 * data.ivariance * mask
         
+        stellar_likelihood = -0.5 * (chi_sq - np.log(data.ivariance))
+
         if "Po" in theta_dict:
             Po, Vo, Yo = [theta_dict.get(each) for each in ("Po", "Vo", "Yo")]
 
-            model_likelihood = -0.5 * (chi_sq - np.log(data.ivariance))
             outlier_ivariance = 1.0/(Vo + data.variance)
             outlier_likelihood = -0.5 * ((data.flux - Yo)**2 * outlier_ivariance \
                 * mask - np.log(outlier_ivariance))
             likelihood = np.logaddexp(
-                np.log(1. - Po) + model_likelihood,
+                np.log(1. - Po) + stellar_likelihood,
                 np.log(Po)      + outlier_likelihood)
-            finite = np.isfinite(likelihood)
 
         else:
-            likelihood = -0.5 * chi_sq
-            finite = np.isfinite(likelihood)
+            likelihood = stellar_likelihood
+        
+        finite = np.isfinite(likelihood)
+        if finite.sum() == 0:
+            raise RuntimeError("no observed pixels used to calculate likelihood"\
+                " -- are all of your pixels masked?")
+
         return likelihood[finite].sum()
 
 
-    def _log_probability(self, theta, data):
+    def _log_probability(self, theta, data, verbose=False):
         """
         Return the logarithmic probability of the model parameters ``theta``.
 
@@ -856,8 +450,13 @@ class SpectralChannel(Model):
 
         log_prior = self._log_prior(theta)
         if not np.isfinite(log_prior):
+            if verbose:
+                print(log_prior)
             return log_prior
-        return log_prior + self._log_likelihood(theta, data)
+        probability = log_prior + self._log_likelihood(theta, data)
+        if verbose:
+            print(probability)
+        return probability
 
 
     def initial_guess(self, data, initial_clip_iterations=5,
@@ -935,18 +534,21 @@ class SpectralChannel(Model):
 
         # Estimate line absorption parameters.
         if absorption_profile_parameters:
-            for i, (wavelength, species) in enumerate(config["balance"]["atomic_lines"]):
+            for i, (wavelength, species) in enumerate(self.config["balance"]["atomic_lines"]):
                 if "ld_{0}".format(i) in self.parameters:
-                    profile = AbsorptionProfile(
-                        self.parameters.get("wl_{0}".format(i), wavelength),
-                        **self.absorption_profile_kwargs)
-                    for parameter, value in profile.initial_guess(data).iteritems():
-                        if parameter not in ("Po", "Vo", "Yo"):
-                            initial_theta["{0}_{1}".format(parameter, i)] = value
+                    
+                    index = data.disp.searchsorted(wavelength)
+                    line_continuum = continuum if isinstance(continuum, (int, float)) \
+                        else continuum[index]
+
+                    initial_theta["ld_{0}".format(i)] = \
+                        line_continuum - data.flux[index]
+                    initial_theta["sigma_{0}".format(i)] = 0.05
+                    initial_theta["shape_{0}".format(i)] = 0.50
 
         # Some final defaults.
         initial_theta.update({
-            "Po": 0.1,
+            "Po": 0.50,
             "Vo": 0.01,
             "Yo": np.median(continuum),
             "z": 0. # [TODO]
@@ -955,7 +557,7 @@ class SpectralChannel(Model):
             for p in self.parameters]))
 
 
-    def optimise(self, data, maxfun=10e4, maxiter=10e4, xtol=1e-8, ftol=1e-8,
+    def optimise(self, data, maxfun=10e3, maxiter=10e3, xtol=0.01, ftol=0.01,
         threads=-1, full_output=False):
         """
         Optimise the model parameters given the data.
@@ -1014,7 +616,7 @@ class SpectralChannel(Model):
             The optimised model parameters.
         """
 
-        initial_theta = self.initial_guess(data, absorption_profile_parameters=False)
+        initial_theta = self.initial_guess(data, absorption_profile_parameters=True)
 
         # Create the continuum.
         num_coefficients = self._get_num_coefficients()
@@ -1025,68 +627,125 @@ class SpectralChannel(Model):
 
         else:
             continuum = 1.
-
+        
         xopts = []
         processes = []
         threads = mp.cpu_count() if threads < 0 else threads
         pool = mp.Pool(threads)
+        mask = self.mask(data.disp)
+
+        pre_opt_theta = {}
+        pre_opt_theta.update(initial_theta)
         for i, (wavelength, species) in enumerate(self.config["balance"]["atomic_lines"]):
             if "ld_{0}".format(i) in self.parameters:
                 
                 # Optimise the parameters of the absorption profile.
-                profile = AbsorptionProfile(wavelength, **self.absorption_profile_kwargs)
-                process = pool.apply_async(_optimiser, args=(profile, data, continuum))
+
+                # Only supply +/- 1 or 2 Angstroms
+                # [TODO]
+                indices = data.disp.searchsorted([
+                    wavelength - 0.3,
+                    wavelength + 0.3
+                ])
+                _data = specutils.Spectrum1D(disp=data.disp.__getslice__(*indices),
+                    flux=data.flux.__getslice__(*indices),
+                    variance=data.variance.__getslice__(*indices))
+                _mask = mask.__getslice__(*indices)
+                _data.flux[~np.isfinite(_mask)] = np.nan
+
+                if isinstance(continuum, (int, float)):
+                    _continuum = continuum
+
+                else:
+                    _continuum = continuum.__getslice__(*indices)
+
+                profile = profiles.AbsorptionProfile(wavelength)
+                process = pool.apply_async(_optimiser, args=(profile, _data, _continuum))
                 processes.append([i, profile, process])
-            
+        
         for i, profile, process in processes:
             xopt = dict(zip(profile.parameters, process.get()))
             for parameter in set(xopt).difference(["Po", "Vo", "Yo"]):
-                initial_theta["{0}_{1}".format(parameter, i)] = xopt[parameter]
-            
+                pre_opt_theta["{0}_{1}".format(parameter, i)] = xopt[parameter]
+        
         pool.close()
         pool.join()
-
         
+
+        # If some optimisation failed and those values are at the edge of what
+        # is acceptable, then we will need to alter those values. If we don't,
+        # then half of the points will have starting values greater than what
+        # is allowed by the priors. For each parameter that has an initial value
+        # on the edge of what's allowed, we will lose 50% of the walkers.
+
+        #initial_theta = self._clip_points_for_sampling(initial_theta)
+
+
         import matplotlib.pyplot as plt
         
         print("MODEL PARAMETERS")
+        for k, v in initial_theta.iteritems():
+            print("{0} = {1:.3f}".format(k, v))
+
         print(self.parameters)
+
+        fig = plot.spectrum_comparison([data], self, initial_theta)
+        ax = fig.axes[0]
         
-        posteriors, sampler, info = self.infer(data, np.array([initial_theta[p] for p in self.parameters]))
+
+        # OK, now optimise (minimise) the negative log probability, maybe?
+        if num_coefficients > 0 \
+        or "z" in self.parameters \
+        or "Po" in self.parameters:
+            op_kwargs = {
+                "maxfun": maxfun,
+                "maxiter": maxiter,
+                "xtol": xtol,
+                "ftol": ftol,
+                "disp": False,
+                "full_output": True # Necessary for introspection and provenance.
+            }
+            t_init = time()
+            op_x, op_fopt, op_niter, op_nfunc, op_warnflag = op.fmin(
+                lambda theta, data, verbose: -self._log_probability(theta, data, verbose),
+                [pre_opt_theta.get(parameter) for parameter in self.parameters],
+                args=(data, True, ), **op_kwargs)
+            self._opt_warn_message(op_warnflag, op_niter, op_nfunc)
+            op_theta = dict(zip(self.parameters, op_x))
+
+            opt_spectra = self(dispersion=data.disp, **op_theta)
+            ax.plot(data.disp, opt_spectra[:,1], 'r', label='opt')
+
+        else:
+            op_x = [pre_opt_theta.get(parameter) for parameter in self.parameters]
+
+
+        opt_spectra = self(dispersion=data.disp, **pre_opt_theta)
+        ax.plot(data.disp, opt_spectra[:,1], 'g', label='pre-opt')
+        
+
+
+        ax = fig.axes[0]
+        posteriors, sampler, info = self.infer(data, op_x)
+
 
         ml_index = sampler.chain.reshape(-1, len(self.parameters))[sampler.lnprobability.flatten().argmax()]
         ml_values = dict(zip(self.parameters, ml_index))
-
         map_values = dict(zip(self.parameters, [posteriors[p][0] for p in self.parameters]))
         
-        fig = plot.spectrum_comparison([data], self, initial_theta)
         ml_spectra = self(dispersion=data.disp, **ml_values)
         map_spectra = self(dispersion=data.disp, **map_values)
+        ax.plot(data.disp, ml_spectra[:,1], 'g', label='ML')
+        ax.plot(data.disp, map_spectra[:, 1], 'm', label='MAP')
 
-        ax = fig.axes[0]
-        ax.plot(data.disp, ml_spectra[:,1], 'r', label='ML')
-        ax.plot(data.disp, map_spectra[:, 1], 'g', label='MAP')
+        #from triangle import corner
+        #figur = corner(sampler.chain.reshape(-1, len(self.parameters)), labels=self.parameters)
 
-        from triangle import corner
-        figur = corner(sampler.chain.reshape(-1, len(self.parameters)), labels=self.parameters)
+        fig2 = plot.projection(sampler, self, [data], n=100)
 
         raise a
 
-        # OK, now optimise (minimise) the negative log probability.
-        op_kwargs = {
-            "maxfun": maxfun,
-            "maxiter": maxiter,
-            "xtol": xtol,
-            "ftol": ftol,
-            "disp": False,
-            "full_output": True # Necessary for introspection and provenance.
-        }
-        t_init = time()
-        op_theta, op_fopt, op_niter, op_nfunc, op_warnflag = op.fmin(
-            lambda theta, data: -self._log_probability(theta, data),
-            [initial_theta.get(parameter) for parameter in self.parameters],
-            args=(data, ), **op_kwargs)
-        self._opt_warn_message(op_warnflag, op_niter, op_nfunc)
+
 
 
         import matplotlib.pyplot as plt
@@ -1106,10 +765,10 @@ class SpectralChannel(Model):
 
         if full_output:
             return (op_theta, op_fopt, op_niter, op_funcalls, op_warnflag)
-        return op_theta        
+        return op_theta
 
 
-    def infer(self, data, opt_theta, walkers=100, burn=900, sample=100, threads=24,
+    def infer(self, data, opt_theta, walkers=150, burn=400, sample=100, threads=24,
         **kwargs):
         """
         Infer the model parameters given the data.
@@ -1154,13 +813,25 @@ class SpectralChannel(Model):
             chains and log-probability values for the burn-in and posterior.
         """
 
-        p0 = emcee.utils.sample_ball(opt_theta, [0.01]*len(opt_theta),
+        walkers = walkers if walkers > 0 else 2*len(opt_theta)
+
+        p0 = emcee.utils.sample_ball(opt_theta, [1e-3]*len(opt_theta),
             size=walkers)
 
-        #for i, parameter in enumerate(self.parameters):
-        #    if parameter.startswith("sigma_") or parameter.startswith("fwhm_") \
-        #    or parameter.startswith("Vo"):
-        #        p0[:, i] = np.abs(p0[:, i])
+        p0_orig = p0.copy()
+
+        # Do reflections so that we have a reasonable initial starting point.
+        limits = {
+            "Po": [0, 1],
+            "Vo": [0, None],
+            "ld": [-1, 1],
+            "shape": [0, 1],
+            "sigma": [0, 1]
+        }
+        for i, parameter in enumerate(self.parameters):
+            limit = limits.get(parameter.split("_")[0], False)
+            if limit:
+                p0[:, i] = utils.reflect_about(p0[:, i], limit)
 
         sampler = emcee.EnsembleSampler(walkers, len(self.parameters),
             _inferencer, args=(self, data), threads=threads, **kwargs)
@@ -1494,15 +1165,15 @@ class GenerativeModel(Model):
         return parameters
 
 
-    def __call__(self, dispersions, synth_kwargs=None, **theta):
+    def __call__(self, dispersion, synth_kwargs=None, **theta):
         """
         Generate data for the given :math:`\\theta`.
 
-        :param dispersions:
+        :param dispersion:
             A list of two-length tuples containing the range of wavelengths to
             synthesise.
 
-        :type dispersions:
+        :type dispersion:
             list 
 
         :param synth_kwargs: [optional]
@@ -1545,7 +1216,7 @@ class GenerativeModel(Model):
         #    synth_kwargs.setdefault("wavelength_steps",
         #        [(0., np.min(np.diff(each.disp))/2., 0.) for each in data])
             
-        synthesis_ranges = [(each[0], each[-1]) for each in dispersions]
+        synthesis_ranges = [(each[0], each[-1]) for each in dispersion]
     
         # Synthesise the model spectra first (in parallel where applicable) and
         # then apply the cheap transformations in serial.
@@ -1575,10 +1246,10 @@ class GenerativeModel(Model):
             # continuum spectra (if it is returned with return_continuum)
             # will always be on the same dispersion map as the returned
             # spectra.
-            if len(dispersions[i]) > 2:
-                expected = np.interp(dispersions[i], model_spectrum[:, 0],
+            if len(dispersion[i]) > 2:
+                expected = np.interp(dispersion[i], model_spectrum[:, 0],
                     model_spectrum[:, 1], left=np.nan, right=np.nan)
-                model_spectrum = np.vstack([dispersions[i], expected]).T
+                model_spectrum = np.vstack([dispersion[i], expected]).T
 
             # Apply continuum transformation to the model spectra.
             j, coefficients = 0, []
@@ -1845,18 +1516,20 @@ class GenerativeModel(Model):
 
         theta_dict = dict(zip(self.parameters, theta))
         try:
-            expected = self(dispersions=[spectrum.disp for spectrum in data],
+            expected = self(dispersion=[spectrum.disp for spectrum in data],
                 synth_kwargs=synth_kwargs, **theta_dict)
 
-        except:
+        except si.SIException:
             # Probably unrealistic astrophysical parameters requested.
             # SI fell over, so we will too.
             # This is OK though: if *all* walkers fell over simultaneously then
             # we would still end up raising an exception
             return -np.inf
 
-        if expected is None:
-            return -np.inf
+        else:
+            # No exception, but no spectra either!
+            if expected is None:
+                return -np.inf
 
         z = theta_dict.get("z", 0.)
         likelihood = 0
@@ -1992,8 +1665,8 @@ class GenerativeModel(Model):
             log_prob = self._log_probability(theta, data, synth_kwargs)
 
             # Is this the best so far?
-            if highest_log_prob is None \
-            or (np.isfinite(log_prob) and log_prob > highest_log_prob):
+            if np.isfinite(log_prob) \
+            and (highest_log_prob is None or log_prob > highest_log_prob):
                 best_theta, highest_log_prob = theta_dict, log_prob
 
         # If we have gotten to this point and found no reasonable starting
