@@ -1,3 +1,4 @@
+from glob import glob
 import numpy as np
 
 def split(filename):
@@ -11,15 +12,22 @@ def split(filename):
 
     # Split at points:
     split_points = (5500, 6250, 7000)
+    color = ("blue", "green", "red", "ir")
     previous_point = 0
     for i, point in enumerate(split_points):
         index = data[:,0].searchsorted(point)
         
         this_channel = data[previous_point:index]
-        np.savetxt("{0}_{1}.txt".format(output_filename_base, i + 1), this_channel[::10])
+        sampling_rate = int(np.floor(len(this_channel)/2000.))
+        np.savetxt("{0}_{1}.txt".format(output_filename_base, color[i]), this_channel[::sampling_rate])
         previous_point = index
     last_channel = data[previous_point:]
-    np.savetxt("{0}_{1}.txt".format(output_filename_base, i + 2), last_channel[::10])
+    sampling_rate = int(np.floor(len(last_channel)/2000.))
+    np.savetxt("{0}_{1}.txt".format(output_filename_base, color[-1]), last_channel[::sampling_rate])
 
     print("done")
 
+
+if __name__ == "__main__":
+    files = glob("*narval.txt")
+    map(split, files)
