@@ -33,20 +33,25 @@ version = version_regex.findall(contents)[0]
 # Mantra required to continue).
 
 if "install" in sys.argv:
-    # Check for ifort
-    print("Checking for ifort compiler..")
-    if os.system("which ifort") > 0:
-        raise Exception("No ifort compiler found. Please download the trial "\
-            "version from https://software.intel.com/en-us/intel-fortran-compo"\
-            "ser-xe-evaluation-options")
 
-    # Install SI
-    print("Installing SI..")
-    cwd = os.path.join(os.path.dirname(os.path.abspath(
-        os.path.expanduser(__file__))), "si/code")
-    installer = subprocess.call("make", cwd=cwd, shell=True)
-    if installer != 0:
-        raise Exception("SI fortran code could not be compiled")
+    if "--skip-si" not in map(str.lower, sys.argv):
+        # Check for ifort
+        print("Checking for ifort compiler..")
+        if os.system("which ifort") > 0:
+            raise Exception("No ifort compiler found. Please download the trial "\
+                "version from https://software.intel.com/en-us/intel-fortran-compo"\
+                "ser-xe-evaluation-options")
+
+        # Install SI
+        print("Installing SI..")
+        cwd = os.path.join(os.path.dirname(os.path.abspath(
+            os.path.expanduser(__file__))), "si/code")
+        installer = subprocess.call("make", cwd=cwd, shell=True)
+        if installer != 0:
+            raise Exception("SI fortran code could not be compiled")
+
+    else:
+        print("Skipping SI installation")
 
 setup(name="oracle",
     version=version,
