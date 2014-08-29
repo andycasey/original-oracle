@@ -6,7 +6,7 @@ model:
 
 settings:
   max_synth_threads: 16
-  undersample_rate: 5
+  undersample_rate: 2
 
 
 #mask:
