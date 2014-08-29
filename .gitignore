@@ -13,3 +13,5 @@ dist/
 *.png
 *.jpg
 *.pdf
+
+oracle/tests/data/benchmarks/
