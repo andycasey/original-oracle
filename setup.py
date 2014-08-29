@@ -34,7 +34,7 @@ version = version_regex.findall(contents)[0]
 
 if "install" in sys.argv:
 
-    if "--skip-si" not in map(str.lower, sys.argv):
+    if "skip-si" not in map(str.lower, sys.argv):
         # Check for ifort
         print("Checking for ifort compiler..")
         if os.system("which ifort") > 0:
@@ -52,6 +52,7 @@ if "install" in sys.argv:
 
     else:
         print("Skipping SI installation")
+        sys.argv.remove("skip-si")
 
 setup(name="oracle",
     version=version,
