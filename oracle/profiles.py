@@ -7,11 +7,8 @@ __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 import logging
 import numpy as np
 import scipy.optimize as op
-<<<<<<< HEAD
 
 from scipy.special import wofz
-=======
->>>>>>> 14db79a2e07755db04cd113dcbacb53b123f4278
 from time import time
 
 import utils
