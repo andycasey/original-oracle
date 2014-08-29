@@ -4,70 +4,42 @@
 
 __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 
-__all__ = ["atomic_number", "gaussian", "voigt"]
+__all__ = ["atomic_number", "reflect_about"]
 
 import numpy as np
 from scipy.special import wofz
 
 
-def gaussian(mu, sigma, x):
+def reflect_about(a, limits):
     """
-    Evaluates a Gaussian profile with ``mu`` and ``sigma`` at all values of ``x``.
+    Similar to :func:`numpy.clip`, except it just reflects about some limiting axes.
 
-    :param mu:
-        The profile mean.
+    :param a:
+        The array of values to reflect.
 
-    :type mu:
-        float
-
-    :param sigma:
-        The standard deviation of the profile.
-
-    :type sigma:
-        float
-
-    :param x:
-        The values to calculate the Gaussian profile at.
-
-    :type x:
+    :type a:
         :class:`numpy.array`
 
+    :param limits:
+        The upper and lower limits to reflect about. Use ``None`` for no limit.
+
+    :type limits:
+        A two length tuple or list-type.
+
     :returns:
-        An array with values for the calculated absorption profile.
+        The reflected array.
 
     :rtype:
         :class:`numpy.array`
     """
 
-    return np.exp(-(x - mu)**2 / (2*sigma**2))
+    lower, upper = limits
+    if lower is not None:
+        a[a < lower] = lower + (lower - a[a < lower])
+    if upper is not None:
+        a[a > upper] = upper - (a[a > upper] - upper)
+    return a
 
-
-def voigt(mu, fwhm, shape, x):
-    """
-    Evaluates a Voigt absorption profile across the `x`
-    values with a given local continuum.
-
-    V(x,sig,gam) = Re(w(z))/(sig*sqrt(2*pi))
-    z = (x+i*gam)/(sig*sqrt(2))
-
-    :param mu:
-        The centroid of the line.
-
-    :param fwhm:
-        The full-width half-maximum of the Gaussian profile.
-
-    :param shape:
-        The shape parameter.
-
-    :param x:
-        An array of x-points.
-    """
-    n = len(x) if not isinstance(x, float) else 1
-
-    profile = 1. / wofz(np.zeros((n)) + 1j * np.sqrt(np.log(2.0)) * shape).real
-    return profile * wofz(2*np.sqrt(np.log(2.0)) * (x - mu)/fwhm \
-        + 1j * np.sqrt(np.log(2.0))*shape).real
-    
 
 def atomic_number(element):
     """
