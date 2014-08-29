@@ -1571,7 +1571,6 @@ class GenerativeModel(Model):
             # SI fell over, so we will too.
             # This is OK though: if *all* walkers fell over simultaneously then
             # we would still end up raising an exception
-            raise a
             return -np.inf
 
         else:
@@ -1647,12 +1646,13 @@ class GenerativeModel(Model):
         return log_probability
 
 
-    def _get_speedy_synth_kwargs(self, data, synth_kwargs=None, undersample_rate=1):
+    def _get_speedy_synth_kwargs(self, data, synth_kwargs=None):
         """ Get default synth_kwargs that are optimised for speediness. """
 
         if synth_kwargs is None:
             synth_kwargs = {}
 
+        undersample_rate = self.config["settings"].get("undersample_rate", 1)
         synth_kwargs.setdefault("chunk", True)
         synth_kwargs.setdefault("threads", self.config["settings"].get(
             "max_synth_threads", 1) if "settings" in self.config else 1)
