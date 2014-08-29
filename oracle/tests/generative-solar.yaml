@@ -232,9 +232,6 @@ settings:
 # - [7886.438, 7891.096]
 # - [7891.616, 7900.000]
 
-  #- [4860.95, 4861.70] # hydrogen line
-  #- [6562.2, 6563.4] # hydrogen line
-  #- [7550, 7700] # telluric
 
 #priors:
 #  teff: normal(5800, 150)

@@ -77,7 +77,8 @@ def solve_generative(args):
         logger.info("Saved model spectrum of optimal theta to {0}".format(path))
     
     # Plot the model parameter values against clock time?
-
+    raise a
+    
     # Inference!
     posterior, sampler, info = model.infer(spectra, optimised_theta)
 

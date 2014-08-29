@@ -7,16 +7,17 @@ __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 import logging
 import numpy as np
 import scipy.optimize as op
+<<<<<<< HEAD
 
 from scipy.special import wofz
+=======
+>>>>>>> 14db79a2e07755db04cd113dcbacb53b123f4278
 from time import time
 
 import utils
 import specutils
 
 logger = logging.getLogger("oracle")
-
-
 
 
 def gaussian(mu, sigma, x):
@@ -207,11 +208,6 @@ class AbsorptionProfile(object):
             parameters.extend(["sigma", "shape"])
         elif self.profile == "gaussian":
             parameters.append("sigma")
-
-        #if self.wavelength_tolerance > 0:
-        #    parameters.append("wl")
-        #if self.outliers:
-        #    parameters.extend(["Po", "Vo", "Yo"])
         return parameters
 
 
