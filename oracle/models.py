@@ -20,6 +20,7 @@ from scipy.ndimage import gaussian_filter1d
 import emcee
 
 import plot
+import moog
 import si
 import specutils
 
@@ -256,7 +257,8 @@ class SpectralChannel(Model):
         # We can't get the exact model parameters unless we know the observed
         # dispersion range.
         transition_parameters = ("shape", "ld", "sigma")
-        for i, (wavelength, species) in enumerate(config["balance"]["atomic_lines"]):
+        for i, transition_data in enumerate(config["balance"]["atomic_lines"]):
+            wavelength = transition_data[0]
             if self._data is None \
             or (self._data.disp[-1] >= wavelength >= self._data.disp[0]):
                 parameters.extend(["{0}_{1}".format(each, i) \
@@ -319,7 +321,8 @@ class SpectralChannel(Model):
             flux = np.ones(len(dispersion))
 
         # Model the absorption profiles!
-        for i, (wavelength, species) in enumerate(self.config["balance"]["atomic_lines"]):
+        for i, transition_data in enumerate(self.config["balance"]["atomic_lines"]):
+            wavelength = transition_data[0]
             # Negative depth means don't model the line.
             depth = theta.get("ld_{0}".format(i), -1)
             if depth > 0: 
@@ -364,7 +367,7 @@ class SpectralChannel(Model):
         or not (10 > theta_dict.get("Vo", 1) > 0):
             return -np.inf
 
-        for i, (wavelength, species) in enumerate(self.config["balance"]["atomic_lines"]):
+        for i, transition_data in enumerate(self.config["balance"]["atomic_lines"]):
             #if ("wl_{0}".format(i) in self.parameters \
             #and abs(wavelength - theta_dict["wl_{0}".format(i)]) > wavelength_tolerance) \
             if not (1 >= theta_dict.get("ld_{0}".format(i), 0) >= -1) \
@@ -542,9 +545,10 @@ class SpectralChannel(Model):
 
         # Estimate line absorption parameters.
         if absorption_profile_parameters:
-            for i, (wavelength, species) in enumerate(self.config["balance"]["atomic_lines"]):
+            for i, transition_data in enumerate(self.config["balance"]["atomic_lines"]):
                 if "ld_{0}".format(i) in self.parameters:
                     
+                    wavelength = transition_data[0]    
                     index = data.disp.searchsorted(wavelength)
                     line_continuum = continuum if isinstance(continuum, (int, float)) \
                         else continuum[index]
@@ -647,9 +651,10 @@ class SpectralChannel(Model):
 
         pre_opt_theta = {}
         pre_opt_theta.update(initial_theta)
-        for i, (wavelength, species) in enumerate(self.config["balance"]["atomic_lines"]):
+        for i, transition_data in enumerate(self.config["balance"]["atomic_lines"]):
             if "ld_{0}".format(i) in self.parameters:
                 
+                wavelength = transition_data[0]
                 # Optimise the parameters of the absorption profile.
 
                 # Only supply +/- 1 or 2 Angstroms
@@ -1126,7 +1131,7 @@ class StellarSpectrum(Model):
         tabular_results = np.zeros((num_atomic_lines, 3))
 
         # Fill 'er up.
-        tabular_results[:, :2] = np.array(self.config["balance"]["atomic_lines"])
+        tabular_results[:, :2] = np.array(self.config["balance"]["atomic_lines"])[:, :2]
         tabular_results[:, 2] = np.nan
 
         for optimal_channel_theta in optimal_theta:
@@ -1166,44 +1171,60 @@ class StellarSpectrum(Model):
         measured equivalent widths.
         """
 
-        observed = equivalent_width_table[:, 2]
-        atomic_data = np.array(self.config["balance"]["atomic_lines"])
         initial_stellar_parameters = [5800.0, 2.0, -1.0, 1.05]
 
-        def func(theta):
-            temperature, logg, metallicity, xi = theta
-            returned_data = np.array([each[0] for each in si.equivalent_width(
-                temperature, logg, metallicity, xi, atomic_data[:, 0], 
-                atomic_data[:, 1], threads=4, full_output=True)])
+        atomic_data = np.core.records.fromarrays(np.hstack([
+                np.array(self.config["balance"]["atomic_lines"]),
+                equivalent_width_table[:, 2].reshape(-1, 1)
+            ]).T,
+            names=("wavelength", "species", "excitation_potential", "loggf",
+                "equivalent_width"),
+            formats=["f8"] * 5)
 
-            returned_data[0 >= returned_data[:, 2], 2] = np.nan
+        # Create an instance of MOOGSILENT.
+        with moog.instance(debug=True) as moogsilent:
 
-            finite = np.isfinite(returned_data[:, 2])
-            #slopes = stats.linregress(x=returned_data[finite, 1],
-            #    y=returned_data[finite, 2])
+            # Write atomic data to disk
+            finite = np.isfinite(atomic_data["equivalent_width"])
+            line_list_filename = os.path.join(moogsilent.twd, "lines")
+            with open(line_list_filename, "w") as fp:
+                fp.write(moogsilent._format_ew_input(atomic_data[finite]))
+            
+            def excitation_ionisation_balance(theta):
+                temperature, logg, metallicity, xi = theta
 
-            #print(slopes)
-            #raise a
-            print(returned_data[:, 0] - atomic_data[:, 0])
-            expected = returned_data[:, 2]
-            difference = (observed - expected)
-            total = difference[np.isfinite(difference)]
-            print(theta, (total**2).sum())
-            return (total**2).sum()
+                abfind_data = moogsilent.abfind(
+                    temperature, logg, metallicity, xi, line_list_filename)
 
-        op_kwargs = {
-            "maxfun": 10e3,
-            "maxiter": 10e4,
-            "xtol": 0.01,
-            "ftol": 1e-6,
-            "disp": False,
-            "full_output": True # Necessary for introspection and provenance.
-        }
-        t_init = time()
-        #op_theta, op_fopt, op_niter, op_nfunc, op_warnflag
-        result = op.fmin(func,
-            initial_stellar_parameters, **op_kwargs)
-        #self._opt_warn_message(op_warnflag, op_niter, op_nfunc)
+                raise a
+                returned_data[0 >= returned_data[:, 2], 2] = np.nan
+
+                finite = np.isfinite(returned_data[:, 2])
+                #slopes = stats.linregress(x=returned_data[finite, 1],
+                #    y=returned_data[finite, 2])
+
+                #print(slopes)
+                #raise a
+                print(returned_data[:, 0] - atomic_data[:, 0])
+                expected = returned_data[:, 2]
+                difference = (observed - expected)
+                total = difference[np.isfinite(difference)]
+                print(theta, (total**2).sum())
+                return (total**2).sum()
+
+            op_kwargs = {
+                "maxfun": 10e3,
+                "maxiter": 10e4,
+                "xtol": 0.01,
+                "ftol": 1e-6,
+                "disp": False,
+                "full_output": True # Necessary for introspection and provenance.
+            }
+            t_init = time()
+            #op_theta, op_fopt, op_niter, op_nfunc, op_warnflag
+            result = op.fmin(excitation_ionisation_balance,
+                initial_stellar_parameters, **op_kwargs)
+            #self._opt_warn_message(op_warnflag, op_niter, op_nfunc)
 
         raise a
         t_elapsed = time() - t_init
