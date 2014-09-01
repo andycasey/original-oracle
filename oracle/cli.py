@@ -14,10 +14,12 @@ from time import time
 
 import numpy as np
 import matplotlib.pyplot as plt
+import triangle
 
 import plot
 import models
 import specutils
+from utils import latexify
 
 logger = logging.getLogger("oracle")
 
@@ -45,42 +47,72 @@ def solve_generative(args):
 
     # Create the model and load the spectra.
     model = models.GenerativeModel(args.config_filename)
-    spectra = map(specutils.Spectrum.load, args.spectra_filenames)
+    data = map(specutils.Spectrum.load, args.spectra_filenames)
+
+    # Sort the spectra from blue to red
+    data.sort(key=lambda spectrum: spectrum.disp.mean())
   
     # Make some initial guess of the model parameters.
-    initial_guess = model.scatter(spectra, args.num_scatter_points)
+    initial_guess = model.scatter(data, args.num_scatter_points)
     logger.info("Initial guess for model parameters:")
     for parameter, value in initial_guess.iteritems():
         logger.info("\t{0}: {1:.2f}".format(parameter, value))
 
+    image_path = lambda s: os.path.abspath(os.path.expanduser(s.format(
+        args.output_prefix, args.plot_fmt)))
+
     # Create figure showing the initial guess
     if args.plotting:
-        path = os.path.abspath(os.path.expanduser(
-            "{0}-initial.{1}".format(args.output_prefix, args.plot_fmt)))
-        fig = plot.spectrum_comparison(spectra, model, initial_guess)
+        path = image_path("{0}-initial.{1}")
+        fig = plot.spectrum_comparison(data, model, initial_guess)
         fig.savefig(path)
         plt.close(fig)
 
         logger.info("Saved model spectrum of initial theta to {0}".format(path))
         
     # Perform the optimisation from the initial guess point.
-    optimised_theta = model.optimise(spectra, initial_guess)
+    optimised_theta = model.optimise(data, initial_guess)
 
     # Plot a projection showing the optimised theta
     if args.plotting:
-        path = os.path.abspath(os.path.expanduser(
-            "{0}-optimal.{1}".format(args.output_prefix, args.plot_fmt)))
-        fig = plot.spectrum_comparison(spectra, model, optimised_theta)
+        path = image_path("{0}-optimal.{1}")
+        fig = plot.spectrum_comparison(data, model, optimised_theta)
         fig.savefig(path)
         plt.close(fig)
 
         logger.info("Saved model spectrum of optimal theta to {0}".format(path))
     
     # Plot the model parameter values against clock time?
-    raise a
-    
+    # [TODO]
+
     # Inference!
-    posterior, sampler, info = model.infer(spectra, optimised_theta)
+    posteriors, sampler, additional_info = model.infer(data, optimised_theta)
+    print(posteriors)
+    # Make plots, where necessary.
+    if args.plotting:
+
+        # Plot the mean acceptance fractions
+        path = image_path("{0}-acceptance.{1}")
+        fig = plot.acceptance_fractions(additional_info["mean_acceptance_fractions"])
+        fig.savefig(path)
+        plt.close(fig)
+
+        # Plot the values of the chains
+        path = image_path("{0}-chains.{1}")
+        fig = plot.chains(sampler.chain)
+        fig.savefig(path)
+        plt.close(fig)
+
+        # Make a corner plot [of just the astrophysical parameters]
+        # [TODO]
+        path = image_path("{0}-corner.{1}")
+        index = additional_info["burn"] * additional_info["walkers"]
+        fig = triangle.corner(sampler.chain.reshape(-1, len(model.parameters))[index:, :],
+            labels=latexify(model.parameters))
+        fig.savefig(path)
+        plt.close(fig)
+
+
 
     raise a
 
@@ -89,8 +121,11 @@ def solve_classical(args):
     """ Classical Model Solver """
 
     # Create the model and load the spectra.
-    data = map(specutils.Spectrum.load, args.spectra_filenames)
+    data = specutils.sort_spectra(map(specutils.Spectrum.load, args.spectra_filenames))
     model = models.StellarSpectrum(args.config_filename, data)
+
+    # Sort the spectra from blue to red
+    data.sort(key=lambda spectrum: spectrum.disp.mean())
 
     optimised_parameters = model.optimise(data)
 

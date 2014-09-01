@@ -681,7 +681,7 @@ def synthesise(teff, logg, metallicity, xi, wavelengths,
     
     # Check number of threads to use.
     threads = [threads, mp.cpu_count()][threads < 0]
-
+    
     # Synthesise all wavelength regions.
     spectra = []
     stdouts = []
