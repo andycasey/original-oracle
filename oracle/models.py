@@ -1028,7 +1028,8 @@ class StellarSpectrum(Model):
         with moog.instance(debug=True) as moogsilent:
 
             # Write atomic data to disk
-            finite = np.isfinite(atomic_data["equivalent_width"])
+            finite = np.isfinite(atomic_data["equivalent_width"]) \
+                * (atomic_data["equivalent_width"] > 0)
             line_list_filename = os.path.join(moogsilent.twd, "lines")
             with open(line_list_filename, "w") as fp:
                 fp.write(moogsilent._format_ew_input(atomic_data[finite]))
@@ -1037,9 +1038,12 @@ class StellarSpectrum(Model):
             def excitation_ionisation_balance(theta):
                 temperature, xi, logg, metallicity = theta
 
-                data = moogsilent.abfind(
-                    temperature, logg, metallicity, xi, line_list_filename,
-                    clobber=True)
+                try:
+                    data = moogsilent.abfind(
+                        temperature, logg, metallicity, xi, line_list_filename,
+                        clobber=True)
+                except:
+                    return np.array([-np.inf]*4)
 
                 # Excitation balance.
                 excitation_balance = stats.linregress(
