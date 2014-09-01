@@ -46,6 +46,9 @@ def solve_generative(args):
     # Create the model and load the spectra.
     model = models.GenerativeModel(args.config_filename)
     spectra = map(specutils.Spectrum.load, args.spectra_filenames)
+
+    # Sort the spectra from blue to red
+    spectra.sort(key=lambda spectrum: spectrum.disp.mean())
   
     # Make some initial guess of the model parameters.
     initial_guess = model.scatter(spectra, args.num_scatter_points)
@@ -89,8 +92,11 @@ def solve_classical(args):
     """ Classical Model Solver """
 
     # Create the model and load the spectra.
-    data = map(specutils.Spectrum.load, args.spectra_filenames)
+    data = specutils.sort_spectra(map(specutils.Spectrum.load, args.spectra_filenames))
     model = models.StellarSpectrum(args.config_filename, data)
+
+    # Sort the spectra from blue to red
+    data.sort(key=lambda spectrum: spectrum.disp.mean())
 
     optimised_parameters = model.optimise(data)
 
