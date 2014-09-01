@@ -14,7 +14,7 @@ from functools import partial
 from time import time
 
 import numpy as np
-from scipy import optimize as op, stats
+from scipy import optimize as op, integrate, stats
 
 from scipy.ndimage import gaussian_filter1d
 import emcee
@@ -198,7 +198,6 @@ def _inferencer(theta, _class, *args):
         
 
 class SpectralChannel(Model):
-
     
     def __init__(self, configuration, channel_index):
         """
@@ -566,8 +565,8 @@ class SpectralChannel(Model):
             for p in self.parameters]))
 
 
-    def optimise(self, data, maxfun=10e3, maxiter=10e3, xtol=0.01, ftol=0.01,
-        threads=-1, full_output=False):
+    def optimise(self, data, initial_theta=None, maxfun=10e3, maxiter=10e3,
+        xtol=0.01, ftol=0.01, threads=-1, full_output=False):
         """
         Optimise the model parameters given the data.
 
@@ -625,7 +624,10 @@ class SpectralChannel(Model):
             The optimised model parameters.
         """
 
-        initial_theta = self.initial_guess(data, absorption_profile_parameters=True)
+        t_init = time()
+        if initial_theta is None:
+            initial_theta = self.initial_guess(data,
+                absorption_profile_parameters=True)
 
         # Create the continuum.
         num_coefficients = self._get_num_coefficients()
@@ -720,54 +722,18 @@ class SpectralChannel(Model):
                 [pre_opt_theta.get(parameter) for parameter in self.parameters],
                 args=(data, True, ), **op_kwargs)
             self._opt_warn_message(op_warnflag, op_niter, op_nfunc)
-            op_theta = dict(zip(self.parameters, op_x))
+            opt_theta = dict(zip(self.parameters, op_x))
 
-            opt_spectra = self(dispersion=data.disp, **op_theta)
-            ax.plot(data.disp, opt_spectra[:,1], 'g', label='opt')
+            #opt_spectra = self(dispersion=data.disp, **op_theta)
+            #ax.plot(data.disp, opt_spectra[:,1], 'g', label='opt')
 
         else:
             op_x = [pre_opt_theta.get(parameter) for parameter in self.parameters]
+            opt_theta = pre_opt_theta
 
+        opt_spectra = self(dispersion=data.disp, **pre_opt_theta)
+        ax.plot(data.disp, opt_spectra[:,1], 'r', label='opt')
 
-        
-
-
-        ax = fig.axes[0]
-        posteriors, sampler, info = self.infer(data, op_x)
-
-        
-        ml_index = sampler.chain.reshape(-1, len(self.parameters))[sampler.lnprobability.flatten().argmax()]
-        ml_values = dict(zip(self.parameters, ml_index))
-        map_values = dict(zip(self.parameters, [posteriors[p][0] for p in self.parameters]))
-        
-        ml_spectra = self(dispersion=data.disp, **ml_values)
-        map_spectra = self(dispersion=data.disp, **map_values)
-        #ax.plot(data.disp, ml_spectra[:,1], 'g', label='ML')
-        ax.plot(data.disp, ml_spectra[:, 1], 'r', label='ML')
-
-        
-
-
-        #from triangle import corner
-        #figur = corner(sampler.chain.reshape(-1, len(self.parameters)), labels=self.parameters)
-
-        fig2 = plot.projection(sampler, self, [data], n=100)
-
-        raise a
-
-
-
-
-        import matplotlib.pyplot as plt
-        fig,ax = plt.subplots()
-        ax.plot(data.disp, data.flux, 'k')
-        model_spectra = self(dispersion=data.disp, **initial_theta)
-        ax.plot(model_spectra[:,0], model_spectra[:,1], 'b')
-
-        model_spectra = self(dispersion=data.disp, **dict(zip(self.parameters, op_theta)))
-        ax.plot(model_spectra[:,0], model_spectra[:,1], 'r')
-
-        raise a
 
 
         t_elapsed = time() - t_init
@@ -775,7 +741,7 @@ class SpectralChannel(Model):
 
         if full_output:
             return (op_theta, op_fopt, op_niter, op_funcalls, op_warnflag)
-        return op_theta
+        return opt_theta
 
 
     def _clip_points_for_sampling(self, theta, tolerance=0.01):
@@ -988,28 +954,33 @@ class StellarSpectrum(Model):
         return [channel(**theta) for channel in self.channels]
 
 
-    def initial_guess(self, **kwargs):
-        return [channel.initial_guess(**kwargs) for channel in self.channels]
+    def initial_guess(self, data, **kwargs):
+        return [channel.initial_guess(spectrum, **kwargs) \
+            for channel, spectrum in zip(self.channels, data)]
 
 
 
-    def optimise(self, data, initial_theta=None, max_global_iterations=1,
+    def optimise(self, data, initial_theta=None,
         threads=-1, op_line_kwargs=None):
         """
         Optimise the model parameters given the data.
 
         """
 
-        for channel, spectrum in zip(self.channels, data):
-            result = channel.optimise(spectrum)
-
+        # TODO CHANGE INIITAL_THETA TO SINGLE DICT AND NOT LIST OF DICTS
         if initial_theta is None:
             initial_theta = self.initial_guess(data)
 
+        results = [c.optimise(d) for c, d in zip(self.channels, data)]
+
+        table = self.integrate_profiles(results)
+        result = self.optimise_stellar_parameters(table)
+
+        raise a
+
         line_kwargs = { "xtol": 1e-8, "ftol": 1e-8, "maxfun": 10e4, "maxiter": 10e4,
             "full_output": True, "disp": False }
-        channel_kwargs = { "ftol": 1e-3, "maxfun": 10e4, "maxiter": 10e4,
-            "full_output": True, "disp": False } 
+        
 
         if op_line_kwargs is not None:
             line_kwargs.update(op_line_kwargs)
@@ -1024,17 +995,18 @@ class StellarSpectrum(Model):
         # Then we will optimise each model.
         
         opt_theta = {}
+        results = []
         for i in range(max_global_iterations):
             for j, channel in enumerate(self.channels):
 
                 result = channel.optimise()
-                raise a
+                results.append(result)
                 
                 # Change the channel continuum coefficient parameter names
 
                 # Change the redshift parameter name if necessary
 
-
+        raise a
 
         config = self.config["balance"]
         
@@ -1134,6 +1106,113 @@ class StellarSpectrum(Model):
 
         return opt_theta
         
+
+    def integrate_profiles(self, optimal_theta, xlimits=1):
+        """
+        Integrate measured absorption profiles to find equivalent widths for all
+        atomic absorption lines in the current model.
+
+        :param optimal_theta:
+            The optimised model parameters for each channel.
+
+        :type optimal_theta:
+            list of dicts
+
+        :returns:
+            An array of atomic transitions and integrated equivalent widths.
+        """
+
+        num_atomic_lines = len(self.config["balance"]["atomic_lines"])
+        tabular_results = np.zeros((num_atomic_lines, 3))
+
+        # Fill 'er up.
+        tabular_results[:, :2] = np.array(self.config["balance"]["atomic_lines"])
+        tabular_results[:, 2] = np.nan
+
+        for optimal_channel_theta in optimal_theta:
+
+            for parameter, value in optimal_channel_theta.iteritems():
+                # Identify a line.
+                if parameter.startswith("ld_"):
+                    transition_index = int(parameter.split("_")[1])
+                    wavelength, atomic_number = tabular_results[transition_index, :2]
+                    
+                    # Has this transition been measured already in a different
+                    # channel?
+                    if np.isfinite(tabular_results[transition_index, 2]):
+                        logger.warn("{0} transition at {1:.3f} already has a "\
+                            "measured equivalent width of {2:.2f} mA".format(
+                                utils.element(atomic_number), wavelength,
+                                tabular_results[transition_index, -1]))
+
+                    # Integrate the profile.
+                    depth = value
+                    shape = optimal_channel_theta["shape_{0}".format(transition_index)]
+                    sigma = optimal_channel_theta["sigma_{0}".format(transition_index)]
+                    y = lambda x: depth * profiles.voigt(wavelength, sigma, shape, x)
+                    equivalent_width, integration_error_est = integrate.quad(y,
+                        wavelength - xlimits, wavelength + xlimits)
+
+                    # Save it (in mA)
+                    tabular_results[transition_index, -1] = equivalent_width * 1000.
+
+        return tabular_results
+
+
+    def optimise_stellar_parameters(self, equivalent_width_table, 
+        initial_stellar_parameters=None, model_outliers=True):
+        """
+        Optimise stellar parameters (Teff, logg, [Fe/H], xi) given some 
+        measured equivalent widths.
+        """
+
+        observed = equivalent_width_table[:, 2]
+        atomic_data = np.array(self.config["balance"]["atomic_lines"])
+        initial_stellar_parameters = [5800.0, 2.0, -1.0, 1.05]
+
+        def func(theta):
+            temperature, logg, metallicity, xi = theta
+            returned_data = np.array([each[0] for each in si.equivalent_width(
+                temperature, logg, metallicity, xi, atomic_data[:, 0], 
+                atomic_data[:, 1], threads=4, full_output=True)])
+
+            returned_data[0 >= returned_data[:, 2], 2] = np.nan
+
+            finite = np.isfinite(returned_data[:, 2])
+            #slopes = stats.linregress(x=returned_data[finite, 1],
+            #    y=returned_data[finite, 2])
+
+            #print(slopes)
+            #raise a
+            print(returned_data[:, 0] - atomic_data[:, 0])
+            expected = returned_data[:, 2]
+            difference = (observed - expected)
+            total = difference[np.isfinite(difference)]
+            print(theta, (total**2).sum())
+            return (total**2).sum()
+
+        op_kwargs = {
+            "maxfun": 10e3,
+            "maxiter": 10e4,
+            "xtol": 0.01,
+            "ftol": 1e-6,
+            "disp": False,
+            "full_output": True # Necessary for introspection and provenance.
+        }
+        t_init = time()
+        #op_theta, op_fopt, op_niter, op_nfunc, op_warnflag
+        result = op.fmin(func,
+            initial_stellar_parameters, **op_kwargs)
+        #self._opt_warn_message(op_warnflag, op_niter, op_nfunc)
+
+        raise a
+        t_elapsed = time() - t_init
+        logger.info("Optimisation took {0:.2f} seconds".format(t_elapsed))
+
+        raise a
+
+
+
 
 
 class GenerativeModel(Model):
@@ -1259,7 +1338,7 @@ class GenerativeModel(Model):
         synth_kwargs["full_output"] = False
 
         # Request the wavelength step to be ~twice the observed pixel sampling.
-        #if data is not None:
+        #if data is not None:f
         #    synth_kwargs.setdefault("wavelength_steps",
         #        [(0., np.min(np.diff(each.disp))/2., 0.) for each in data])
             
@@ -1420,7 +1499,7 @@ class GenerativeModel(Model):
 
         # OK, what about parameter stubs
         default_rule_stubs = collections.OrderedDict([
-            ("doppler_sigma_", "uniform(0, 0.2)")
+            ("doppler_sigma_", "0.05")
         ])
 
         for parameter in remaining_parameters:

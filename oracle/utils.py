@@ -4,7 +4,7 @@
 
 __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 
-__all__ = ["atomic_number", "reflect_about"]
+__all__ = ["atomic_number", "element", "reflect_about"]
 
 import numpy as np
 from scipy.special import wofz
@@ -80,3 +80,38 @@ def atomic_number(element):
         return ValueError("element '{0}' is not known".format(element))
 
     return periodic_table.index(element) + 1
+
+
+def element(atomic_number):
+    """
+    Return the element of a given atomic number.
+
+    :param atomic_number:
+        The atomic number for the element in question (e.g., 26).
+
+    :type atomic_number:
+        int-like
+
+    :returns:
+        The short-hand element for a given atomic number.
+
+    :rtype:
+        str
+    """
+
+    atomic_number = int(atomic_number)
+    periodic_table = """H                                                  He
+                        Li Be                               B  C  N  O  F  Ne
+                        Na Mg                               Al Si P  S  Cl Ar
+                        K  Ca Sc Ti V  Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr
+                        Rb Sr Y  Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I  Xe
+                        Cs Ba Lu Hf Ta W  Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn
+                        Fr Ra Lr Rf Db Sg Bh Hs Mt Ds Rg Cn UUt"""
+    
+    lanthanoids    =   "La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb"
+    actinoids      =   "Ac Th Pa U  Np Pu Am Cm Bk Cf Es Fm Md No"
+    
+    periodic_table = periodic_table.replace(" Ba ", " Ba " + lanthanoids + " ") \
+        .replace(" Ra ", " Ra " + actinoids + " ").split()
+    del actinoids, lanthanoids
+    return periodic_table[atomic_number - 1]

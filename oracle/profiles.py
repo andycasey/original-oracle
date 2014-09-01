@@ -426,6 +426,7 @@ class AbsorptionProfile(object):
         }
         return dict(zip(self.parameters, [theta[p] for p in self.parameters]))
 
+
     @classmethod
     def _opt_warn_message(cls, warnflag, niter, nfunc):
         """ Log a warning message after optimisation. """

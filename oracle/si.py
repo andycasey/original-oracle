@@ -283,12 +283,14 @@ class instance(object):
                     abundance=abundance))
         # Execute it.
         returncode, stdout, stderr = self.execute()
-
+        
         try:
-            equivalent_width = np.loadtxt(os.path.join(self.twd, "fort.16"),
-                usecols=(4, )).flatten()[0]
+            wavelength, lower_excitation_potential, equivalent_width = \
+                np.loadtxt(os.path.join(self.twd, "fort.16"),
+                    usecols=(0, 2, 6, )).flatten()
 
         except IOError:
+            raise
             logger.warn("No equivalent width found in {0}:".format(
                 os.path.join(self.twd, "fort.16")))
             logger.warn("SI output (code {0}):\n{1}\n{2}".format(
@@ -317,7 +319,8 @@ class instance(object):
                 raise SIException("no synthetic spectra found in {0}".format(
                     os.path.join(self.twd, "fort.14")))
 
-            return (equivalent_width, synthetic_spectra, stdout)
+            return ([wavelength, lower_excitation_potential, equivalent_width],
+                synthetic_spectra, stdout)
         return equivalent_width
 
 
@@ -447,8 +450,8 @@ class instance(object):
 
     def __exit__(self, exit_type, value, traceback):
         # Remove the temporary working directory and any files in it.
-        #if exit_type not in (IOError, SIException) and not self.debug:
-        if not self.debug:
+        if exit_type not in (IOError, SIException) and not self.debug:
+            #if not self.debug:
             shutil.rmtree(self.twd)
         else:
             logger.info("Temporary directory {0} has been kept to allow debugging"
@@ -590,7 +593,7 @@ def equivalent_width(teff, logg, metallicity, xi, rest_wavelengths, species,
         pool.close()
         pool.join()
 
-    return equivalent_widths[0] if single_call else equivalent_widths
+    return equivalent_widths[0] if single_call else np.array(equivalent_widths)
 
 
 def synthesise(teff, logg, metallicity, xi, wavelengths,
