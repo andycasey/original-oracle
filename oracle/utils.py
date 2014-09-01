@@ -4,7 +4,7 @@
 
 __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 
-__all__ = ["atomic_number", "element", "reflect_about"]
+__all__ = ["atomic_number", "element", "reflect_about", "latexify"]
 
 import numpy as np
 from scipy.special import wofz
@@ -39,6 +39,50 @@ def reflect_about(a, limits):
     if upper is not None:
         a[a > upper] = upper - (a[a > upper] - upper)
     return a
+
+
+def latexify(labels, default_latex_labels=None):
+    """
+    Return a LaTeX-ified label.
+
+    Args:
+        labels (str or list-type of str objects): The label(s) to latexify. 
+        default_latex_labels (dict): Dictionary of common labels to use.
+
+    Returns:
+        LaTeX-ified label.
+    """
+
+    common_labels = {
+        "teff": "$T_{\\rm eff}$ (K)",
+        "feh": "[Fe/H]",
+        "logg": "$\log{g}$",
+        "alpha": "[$\\alpha$/Fe]",
+        "xi": "$\\xi$ (km s$^{-1}$)"
+    }
+
+    if default_latex_labels is not None:
+        common_labels.update(default_latex_labels)
+    
+    listify = True
+    if isinstance(labels, str):
+        listify = False
+        labels = [labels]
+
+    latex_labels = []
+    for label in labels:
+
+        if label.startswith("doppler_sigma_"):
+            color = ["blue", "green", "red", "ir"][int(label.split("_")[-1])]
+            latex_labels.append("$\sigma_{\\rm doppler," + color + "}$ ($\\AA{}$)")
+
+        else:
+            latex_labels.append(common_labels.get(label, label))
+
+    if not listify:
+        return latex_labels[0]
+
+    return latex_labels
 
 
 def atomic_number(element):

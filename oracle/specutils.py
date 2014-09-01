@@ -91,6 +91,8 @@ class Spectrum1D(object):
         
         self.disp = disp
         self.flux = flux
+        if variance is None:
+            variance = flux
         self.variance = variance
         # Better to send an extra array (ivariance) around than calculate it at
         # every single likelihood call.

@@ -779,7 +779,7 @@ class SpectralChannel(Model):
 
         return clipped_theta
 
-    def infer(self, data, opt_theta, walkers=50, burn=400, sample=100, threads=24,
+    def infer(self, data, opt_theta, walkers=-1, burn=400, sample=100, threads=16,
         **kwargs):
         """
         Infer the model parameters given the data.
@@ -1255,7 +1255,7 @@ class GenerativeModel(Model):
         # Any redshift parameters?
         if config["model"]["redshift"]:
             # [TODO] Allow individual channel redshifts
-            parameters.append("z")
+            parameters.extend(["z_{0}".format(i) for i in range(self._num_observed_channels)])
 
         # Any continuum parameters?
         if config["model"]["continuum"]:
@@ -1478,7 +1478,7 @@ class GenerativeModel(Model):
                 "if logg > 3.5 else 2.70 - 0.509 * logg"),
             ("Po", np.random.uniform(0, 1)),
             ("Vo", abs(np.random.normal(0, 1))),
-            ("Ys", np.random.normal(1, 0.01))
+            ("Ys", np.random.normal(1, 0.01)),
         ])
         # [TODO] Vo and Ys above. What are you doing?!
 
@@ -1499,7 +1499,7 @@ class GenerativeModel(Model):
 
         # OK, what about parameter stubs
         default_rule_stubs = collections.OrderedDict([
-            ("doppler_sigma_", "0.05")
+            ("doppler_sigma_", "0.20")
         ])
 
         for parameter in remaining_parameters:
@@ -1662,7 +1662,7 @@ class GenerativeModel(Model):
         for observed, model in zip(data, expected):
 
             mask = self.mask(observed.disp, z)
-            chi_sq = (observed.flux - model[:, 1])**2 * observed.ivariance * mask
+            chi_sq = (observed.flux - model[:, 1])**2 * observed.ivariance
 
             if "Po" not in theta_dict:
                 finite = np.isfinite(chi_sq)
@@ -1738,6 +1738,7 @@ class GenerativeModel(Model):
         synth_kwargs.setdefault("wavelength_steps",
             [(wls, wls, wls) for wls in [undersample_rate*np.median(np.diff(s.disp)) \
                 for s in data]])
+
         return synth_kwargs
 
 
@@ -1810,8 +1811,8 @@ class GenerativeModel(Model):
         return best_theta
 
 
-    def optimise(self, data, initial_theta=None, synth_kwargs=None, maxfun=500,
-        maxiter=500, xtol=0.10, ftol=10e10, full_output=False):
+    def optimise(self, data, initial_theta=None, synth_kwargs=None, maxfun=10e3,
+        maxiter=10e3, xtol=0.05, ftol=0.01, full_output=False):
         """
         Optimise the logarithmic probability of the model parameters theta given
         the data.
@@ -1908,8 +1909,8 @@ class GenerativeModel(Model):
         return op_theta_dict
 
 
-    def infer(self, data, optimised_theta=None, p0=None, walkers=20, burn=200, 
-        sample=100, threads=-1, **kwargs):
+    def infer(self, data, optimised_theta=None, p0=None, walkers=-1, burn=150, 
+        sample=150, threads=1, synth_kwargs=None, **kwargs):
         """
         Infer the model parameters given the data.
 
@@ -1978,9 +1979,12 @@ class GenerativeModel(Model):
         if 0 > threads:
             threads = mp.cpu_count()
 
+        walkers = walkers if walkers > 0 else 2 * abs(walkers) * len(optimised_theta)
+
+        synth_kwargs = self._get_speedy_synth_kwargs(data, synth_kwargs)
         mean_acceptance_fractions = np.zeros((burn + sample))
         sampler = emcee.EnsembleSampler(walkers, len(self.parameters),
-            _inferencer, args=(self, data), threads=threads, **kwargs)
+            _inferencer, args=(self, data, synth_kwargs), threads=threads, **kwargs)
         
         # Do we need to create p0 from optimised_theta?
         if optimised_theta is not None:
@@ -1996,19 +2000,19 @@ class GenerativeModel(Model):
 
             #p0 = np.array([theta + 1e-4*np.random.randn(len(self.parameters)) \
             #    for i in range(walkers)])
-       
-
-        for i, (pos, lnprob, rstate) in enumerate(sampler.sample(p0, iterations=burn)):
+        print("ready")
+        for i, (pos, lnprob, rstate) in enumerate(sampler.sample(p0, iterations=burn+sample)):
             mean_acceptance_fractions[i] = np.mean(sampler.acceptance_fraction)
-            logger.info("Sampler has finished step {0:.0f} of burn-in with "\
-                "<a_f> = {1:.3f}, maximum log probability in last step was "\
-                "{2:.3e}".format(i + 1, mean_acceptance_fractions[i],
-                    np.max(sampler.lnprobability[:, i])))
+            logger.info("Sampler has finished step {0:.0f} ({1}) of {2:.0f} with "\
+                "<a_f> = {3:.3f}, maximum log probability in last step was "\
+                "{4:.3e}".format(i + 1, ["burn-in", "sample"][i >= burn], burn + sample,
+                    mean_acceptance_fractions[i], np.max(sampler.lnprobability[:, i])))
 
             if mean_acceptance_fractions[i] in (0, 1):
                 raise RuntimeError("mean acceptance fraction is {0:.0f}!".format(
                     mean_acceptance_fractions[i]))
 
+        """
         # Save the chain and calculated log probabilities for later
         chain, lnprobability = sampler.chain, sampler.lnprobability
         sampler.reset()
@@ -2029,15 +2033,17 @@ class GenerativeModel(Model):
         # Concatenate the existing chain and lnprobability with the posteriors
         chain = np.concatenate([chain, sampler.chain], axis=1)
         lnprobability = np.concatenate([lnprobability, sampler.lnprobability], axis=1)
+        """
 
         # Get the quantiles.
-        posteriors = dict(zip(self.parameters,map(lambda v: (v[1], v[2]-v[1], v[1]-v[0]),
-            zip(*np.percentile(sampler.chain.reshape(-1, len(self.parameters)),
+        posteriors = dict(zip(self.parameters, map(lambda v: (v[1], v[2]-v[1], v[1]-v[0]),
+            zip(*np.percentile(sampler.chain.reshape(-1, len(self.parameters))[-sample*walkers:, :],
                 [16, 50, 84], axis=0)))))
 
         info = {
-            "chain": chain,
-            "lnprobability": lnprobability,
+            "walkers": walkers,
+            "burn": burn,
+            "sample": sample,
             "mean_acceptance_fractions": mean_acceptance_fractions
         }
 
