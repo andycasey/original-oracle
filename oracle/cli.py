@@ -120,14 +120,35 @@ def solve_generative(args):
 def solve_classical(args):
     """ Classical Model Solver """
 
+    t_init = time()
+
     # Create the model and load the spectra.
-    data = specutils.sort_spectra(map(specutils.Spectrum.load, args.spectra_filenames))
+    data = map(specutils.Spectrum.load, args.spectra_filenames)
     model = models.StellarSpectrum(args.config_filename, data)
 
     # Sort the spectra from blue to red
     data.sort(key=lambda spectrum: spectrum.disp.mean())
 
-    optimised_parameters = model.optimise(data)
+    # Optimise the individual channel parameters
+    optimised_model_parameters = model.optimise(data)
+
+    image_path = lambda s: os.path.abspath(os.path.expanduser(s.format(
+        args.output_prefix, args.plot_fmt)))
+
+    # Plot the spectrum.
+    if args.plotting:
+        path = image_path("{0}-optimised.{1}")
+
+        model_spectra = [c(s.disp, **theta) for c, s, theta in zip(model.channels, data, optimised_model_parameters)]
+        fig = plot.spectrum_comparison(data, model, model_spectra=model_spectra)
+        fig.savefig(path)
+        plt.close(fig)
+
+    atomic_data = model.integrate_profiles(optimised_model_parameters)
+    op_x, op_atomic_data = model.optimise_stellar_parameters(atomic_data,
+        full_output=True)
+
+    logger.info("Full analysis took {0:.2f} seconds".format(time() - t_init))
 
     raise a
     posterior, sampler, info = model.infer(data, optimised_parameters)

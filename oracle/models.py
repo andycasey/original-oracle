@@ -686,30 +686,7 @@ class SpectralChannel(Model):
         
         pool.close()
         pool.join()
-        
-
-        # If some optimisation failed and those values are at the edge of what
-        # is acceptable, then we will need to alter those values. If we don't,
-        # then half of the points will have starting values greater than what
-        # is allowed by the priors. For each parameter that has an initial value
-        # on the edge of what's allowed, we will lose 50% of the walkers.
-
-        #initial_theta = self._clip_points_for_sampling(initial_theta)
-
-
-        import matplotlib.pyplot as plt
-        
-        print("MODEL PARAMETERS")
-        for k, v in initial_theta.iteritems():
-            print("{0} = {1:.3f}".format(k, v))
-
-        print(self.parameters)
-
-        fig = plot.spectrum_comparison([data], self, initial_theta)
-        ax = fig.axes[0]
-        
-
-        # OK, now optimise (minimise) the negative log probability, maybe?
+    
         if num_coefficients > 0 \
         or "z" in self.parameters \
         or "Po" in self.parameters:
@@ -736,10 +713,8 @@ class SpectralChannel(Model):
             op_x = [pre_opt_theta.get(parameter) for parameter in self.parameters]
             opt_theta = pre_opt_theta
 
-        opt_spectra = self(dispersion=data.disp, **pre_opt_theta)
-        ax.plot(data.disp, opt_spectra[:,1], 'r', label='opt')
-
-
+        #opt_spectra = self(dispersion=data.disp, **pre_opt_theta)
+        #ax.plot(data.disp, opt_spectra[:,1], 'r', label='opt')
 
         t_elapsed = time() - t_init
         logger.info("Optimisation took {0:.2f} seconds".format(t_elapsed))
@@ -938,7 +913,7 @@ class StellarSpectrum(Model):
         return list(set(parameters))
 
 
-    def __call__(self, return_continuum=False, **theta):
+    def __call__(self, dispersion, theta):
         """
         Generate data for the given :math:`\\theta`.
 
@@ -956,7 +931,7 @@ class StellarSpectrum(Model):
             dict
         """
 
-        return [channel(**theta) for channel in self.channels]
+        return [c(d, t) for c, d, t in zip(self.channels, dispersion, theta)]
 
 
     def initial_guess(self, data, **kwargs):
@@ -973,143 +948,11 @@ class StellarSpectrum(Model):
         """
 
         # TODO CHANGE INIITAL_THETA TO SINGLE DICT AND NOT LIST OF DICTS
-        if initial_theta is None:
-            initial_theta = self.initial_guess(data)
+        #if initial_theta is None:
+        #    initial_theta = self.initial_guess(data)
 
-        results = [c.optimise(d) for c, d in zip(self.channels, data)]
+        return [c.optimise(d) for c, d in zip(self.channels, data)]
 
-        table = self.integrate_profiles(results)
-        result = self.optimise_stellar_parameters(table)
-
-        raise a
-
-        line_kwargs = { "xtol": 1e-8, "ftol": 1e-8, "maxfun": 10e4, "maxiter": 10e4,
-            "full_output": True, "disp": False }
-        
-
-        if op_line_kwargs is not None:
-            line_kwargs.update(op_line_kwargs)
-       
-        opt_theta = {}
-        opt_theta.update(initial_theta)
-        z_parameter = "z" if "z" in initial_theta else "z_{0}"
-        model_redshift = z_parameter in self.parameters
-        threads = mp.cpu_count() if threads < 0 else threads
-        
-        # Create SpectralChannel models for each observed spectrum.
-        # Then we will optimise each model.
-        
-        opt_theta = {}
-        results = []
-        for i in range(max_global_iterations):
-            for j, channel in enumerate(self.channels):
-
-                result = channel.optimise()
-                results.append(result)
-                
-                # Change the channel continuum coefficient parameter names
-
-                # Change the redshift parameter name if necessary
-
-        raise a
-
-        config = self.config["balance"]
-        
-        for j in range(max_global_iterations):
-
-            # Fit all the lines in each spectrum.
-            num_total_coefficients = 0
-            for i, spectrum in enumerate(data):
-                num_coefficients, z = 0, opt_theta.get(z_parameter.format(i), 0)
-                mask = self.mask(spectrum.disp, z)
-                while "c_{0}_{1}".format(i, num_coefficients) in self.parameters:
-                    num_coefficients += 1
-                num_total_coefficients += num_coefficients
-
-                # Create a continuum.
-                continuum = mask.copy()
-                if num_coefficients > 0:
-                    coefficients = [opt_theta["c_{0}_{1}".format(i, k)] \
-                        for k in range(num_coefficients)]
-                    continuum *= np.polyval(coefficients, spectrum.disp)
-
-                xopts = []
-                processes = []
-                pool = mp.Pool(threads)
-                for k, (wavelength, species) in enumerate(config["atomic_lines"]):
-
-                    # Should we even be fitting this line?
-                    if not (spectrum.disp[-1] >= wavelength >= spectrum.disp[0]):
-                        continue
-
-                    # Fit the absorption line.
-                    p0 = [initial_theta["{0}_{1}".format(each, k)] \
-                        for each in ("ld", "sigma", "wl")]
-
-                    processes.append(pool.apply_async(_absorption_line_fitter,
-                        args=(p0, spectrum, continuum, wavelength, line_kwargs)))
-                    
-                for k, process in enumerate(processes):
-                    xopt = process.get()
-                    opt_theta.update({
-                        "ld_{0}".format(k): np.clip(xopt[0], 0, 1),
-                        "sigma_{0}".format(k): xopt[1],
-                    })
-                    if "wl_{0}".format(k) in opt_theta:
-                        opt_theta["wl_{0}".format(k)] = xopt[2]
-
-                pool.close()
-                pool.join()
-
-          
-
-                # Do we need to optimise global parameters now?
-                if num_total_coefficients > 0 or (model_redshift and z_parameter == "z"):
-
-                    # We *just* want these channel parameters.
-                    single_channel_data = [None] * len(data)
-                    single_channel_data[i] = spectrum
-
-
-
-                    p0 = np.array([opt_theta[p] for p in self.parameters])
-                    xopt, fopt, niter, nfunc, warnflag = op.fmin(
-                        lambda t, *args: -inference.log_probability(t, *args), p0,
-                        args=(self, single_channel_data))
-                    self._opt_warn_message(warnflag, niter, nfunc)
-
-                    # Update the dictionary of optimised values.
-                    opt_theta.update(dict(zip(self.parameters, xopt)))
-
-                elif (z_parameter == "z" and not model_redshift):
-                    # No point re-doing the fitting.
-                    break
-
-
-        import matplotlib.pyplot as plt
-        fig, axes = plt.subplots(4)
-        best_models = self(data=data, **opt_theta)
-
-        for ax, spectrum, model in zip(axes, data, best_models):
-            ax.plot(spectrum.disp, spectrum.flux, 'k')
-            ax.plot(model_spectra[:,0], model_spectra[:,1], 'b')
-
-
-        raise a
-
-
-        import matplotlib.pyplot as plt
-        fig, ax = plt.subplots()
-        ax.plot(spectrum.disp, spectrum.flux, 'k')
-
-        p1 = [opt_theta.get(p) for p in self.parameters]
-        foobar = self(p1, data=data)
-
-        raise a
-        # Should we be doing a global optimisation (all channels simultaneously)
-        # if we have a single redshift?
-
-        return opt_theta
         
 
     def integrate_profiles(self, optimal_theta, xlimits=1):
@@ -1165,13 +1008,13 @@ class StellarSpectrum(Model):
 
 
     def optimise_stellar_parameters(self, equivalent_width_table, 
-        initial_stellar_parameters=None, model_outliers=True):
+        initial_stellar_parameters=None, full_output=False):
         """
         Optimise stellar parameters (Teff, logg, [Fe/H], xi) given some 
         measured equivalent widths.
         """
 
-        initial_stellar_parameters = [5800.0, 2.0, -1.0, 1.05]
+        initial_stellar_parameters = [5800.0, 1.05, 2.0, -1.0]
 
         atomic_data = np.core.records.fromarrays(np.hstack([
                 np.array(self.config["balance"]["atomic_lines"]),
@@ -1190,49 +1033,61 @@ class StellarSpectrum(Model):
             with open(line_list_filename, "w") as fp:
                 fp.write(moogsilent._format_ew_input(atomic_data[finite]))
             
+
             def excitation_ionisation_balance(theta):
-                temperature, logg, metallicity, xi = theta
+                temperature, xi, logg, metallicity = theta
 
-                abfind_data = moogsilent.abfind(
-                    temperature, logg, metallicity, xi, line_list_filename)
+                data = moogsilent.abfind(
+                    temperature, logg, metallicity, xi, line_list_filename,
+                    clobber=True)
 
-                raise a
-                returned_data[0 >= returned_data[:, 2], 2] = np.nan
+                # Excitation balance.
+                excitation_balance = stats.linregress(
+                    x=data["excitation_potential"], y=data["abundance"])[0]
 
-                finite = np.isfinite(returned_data[:, 2])
-                #slopes = stats.linregress(x=returned_data[finite, 1],
-                #    y=returned_data[finite, 2])
+                # Line strength balance.
+                line_strength_balance = stats.linregress(
+                    x=np.log(data["equivalent_width"]/data["wavelength"]),
+                    y=data["abundance"])[0]
 
-                #print(slopes)
-                #raise a
-                print(returned_data[:, 0] - atomic_data[:, 0])
-                expected = returned_data[:, 2]
-                difference = (observed - expected)
-                total = difference[np.isfinite(difference)]
-                print(theta, (total**2).sum())
-                return (total**2).sum()
+                # Ionisation balance.
+                neutral = (data["species"] % 1) == 0
+                ionisation_state = np.mean(data[neutral]["abundance"]) \
+                    - np.mean(data[~neutral]["abundance"])
+
+                # Metallicity state.
+                abundance_state = np.mean(data[neutral]["abundance"]) \
+                    - metallicity - 7.50
+                # [TODO] Remove hard coding.
+
+                results = np.array([excitation_balance, line_strength_balance,
+                    0.10 * ionisation_state, 0.10 * abundance_state])
+
+                print(theta, results, (results**2).sum())
+                return results
 
             op_kwargs = {
-                "maxfun": 10e3,
-                "maxiter": 10e4,
-                "xtol": 0.01,
-                "ftol": 1e-6,
-                "disp": False,
+                "col_deriv": 1,
+                "epsfcn": 0,
+                "xtol": 1e-16,
+                "maxfev": 100,
+                "fprime": utils.stellar_jacobian,
                 "full_output": True # Necessary for introspection and provenance.
             }
             t_init = time()
-            #op_theta, op_fopt, op_niter, op_nfunc, op_warnflag
-            result = op.fmin(excitation_ionisation_balance,
+            op_x, infodict, ier, mesg = op.fsolve(excitation_ionisation_balance,
                 initial_stellar_parameters, **op_kwargs)
-            #self._opt_warn_message(op_warnflag, op_niter, op_nfunc)
 
-        raise a
-        t_elapsed = time() - t_init
-        logger.info("Optimisation took {0:.2f} seconds".format(t_elapsed))
+            t_elapsed = time() - t_init
+            logger.info("Optimisation took {0:.2f} seconds".format(t_elapsed))
 
-        raise a
+            if full_output:
+                op_atomic_data = moogsilent.abfind(op_x[0], op_x[2], op_x[3], op_x[1], 
+                    line_list_filename, clobber=True)
 
-
+        if full_output:
+            return op_x, op_atomic_data
+        return op_x
 
 
 

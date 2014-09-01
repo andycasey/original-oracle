@@ -260,12 +260,14 @@ class instance(object):
             np.array(data).T, names=columns, formats=["f8"] * len(columns))
 
 
-    def abfind(self, teff, logg, metallicity, xi, line_list_filename, **kwargs):
+    def abfind(self, teff, logg, metallicity, xi, line_list_filename, clobber=False, 
+        **kwargs):
         """ Call `abfind` in MOOG """
 
         # Interpolate a model atmosphere
         atmosphere_filename = os.path.join(self.twd, "model")
-        atmospheres.interpolate(atmosphere_filename, teff, logg, metallicity, +0.4, xi)
+        atmospheres.interpolate(atmosphere_filename, teff, logg, metallicity, +0.4, xi,
+            clobber=clobber)
 
         # Copy line list filename to temporary working directory
         line_list_filename = self._cp_to_twd(line_list_filename)
@@ -286,7 +288,7 @@ class instance(object):
 
     def __exit__(self, exit_type, value, traceback):
         # Remove the temporary working directory and any files in it
-        if not self.debug and exit_type not in (IOError, MOOGException):
+        if exit_type not in (IOError, MOOGException) and not self.debug:
             shutil.rmtree(self.twd)
 
         else:
