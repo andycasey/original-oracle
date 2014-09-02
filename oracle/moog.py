@@ -116,7 +116,7 @@ class instance(object):
             dict
         """
 
-        logger.info("Executing input file: {0}".format(filename))
+        logger.debug("Executing input file: {0}".format(filename))
 
         class Alarm(Exception):
             pass
@@ -292,7 +292,7 @@ class instance(object):
             shutil.rmtree(self.twd)
 
         else:
-            logger.info("Temporary directory {0} has been kept to allow debugging".format(self.twd))
+            logger.debug("Temporary directory {0} has been kept to allow debugging".format(self.twd))
         return False
 
 
