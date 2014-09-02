@@ -1,7 +1,10 @@
 **oracle, the suppository of all wisdom**
 ============================================
 
-**Getting Started**
+**[Check out the current to do list](https://github.com/andycasey/oracle/wiki/TODO)**
+
+
+**Installation**
 
 1. [This guide](https://help.github.com/articles/set-up-git) will step you through installing git,
    and will show you how to set up ``git`` with your GitHub credentials so that you can access 
@@ -23,8 +26,6 @@
    sudo python setup.py install 
    ````
 
-
-
 **Updating ``oracle``**
 
 If there are changes to ``oracle`` you can update by doing:
@@ -39,16 +40,23 @@ python setup.py install --user
 sudo python setup.py install
 ````
 
-**Usage**
-This will change wildly while it's in development. Check the tests in ``oracle/tests/`` to get an idea of how to run things.
-
-Currently you **can** do:
+**Generative Solver**
 
 ````
 oracle solve generative <configuration.yaml> <spectrum_blue.fits> [, spectrum_red.fits]
 ````
 
 But this will be slow because there is no fancy pre-optimisation prior to the MCMC sampling.
+
+
+**Classical Solver**
+
+````
+oracle solve classical <configuration.yaml> <spectrum.fits>
+````
+
+To get an idea of some of the flags you can use, do ``oracle solve --help``.
+
 
 
 **Contributing to ``oracle``**
