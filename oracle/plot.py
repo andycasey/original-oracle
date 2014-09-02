@@ -39,7 +39,7 @@ def acceptance_fractions(mean_acceptance_fractions, burn=None, **kwargs):
 
     fig, ax = plt.subplots()
     N = len(mean_acceptance_fractions)
-    ax.plot(mean_acceptance_fractions, np.arange(1, 1 + N), **plot_kwargs)
+    ax.plot(np.arange(1, 1 + N), mean_acceptance_fractions, **plot_kwargs)
     if burn is not None and (N >= burn > 0):
         ax.axvline(burn, ":")
 
