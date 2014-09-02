@@ -1173,10 +1173,9 @@ class AtmosphereInterpolator:
                 else:
                     interpolated_deck[:, logarithmic_structure_property] = np.log10(interpolated_deck[:, logarithmic_structure_property])
 
-
         return interpolated_deck
     
 
-interpolator = AtmosphereInterpolator("../moog/atmospheres/castelli-kurucz-2004",
-    CastelliKuruczParser())
-
+interpolator = AtmosphereInterpolator(
+    os.path.abspath(os.path.join(os.path.dirname(os.path.expanduser(__file__)), 
+        "atmospheres/castelli-kurucz-2004")), CastelliKuruczParser())

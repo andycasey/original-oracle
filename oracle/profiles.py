@@ -534,7 +534,8 @@ class AbsorptionProfile(object):
         self._opt_warn_message(op_warnflag, op_niter, op_nfunc)
 
         t_elapsed = time() - t_init
-        logger.info("Optimisation took {0:.2f} seconds".format(t_elapsed))
+        logger.info("Profile fitting for transition at ~{0:.3f} Angstroms took "\
+            "{1:.2f} seconds".format(self.approx_wavelength, t_elapsed))
 
         if full_output:
             return (op_theta, op_fopt, op_niter, op_funcalls, op_warnflag)

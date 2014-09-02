@@ -148,8 +148,6 @@ def solve_classical(args):
     op_x, op_atomic_data = model.optimise_stellar_parameters(atomic_data,
         full_output=True)
 
-    logger.info("Full analysis took {0:.2f} seconds".format(time() - t_init))
-
     if args.plotting:
         path = image_path("{0}-balance.{1}")
 
@@ -158,10 +156,12 @@ def solve_classical(args):
         fig.savefig(path)
         plt.close(fig)
 
+    logger.info("Full analysis {1}took {0:.2f} seconds".format(time() - t_init,
+        ["", "(including plotting) "][args.plotting]))
 
-    raise a
-    posterior, sampler, info = model.infer(data, optimised_parameters)
 
+    #posterior, sampler, info = model.infer(data, optimised_parameters)
+    logger.info("Fin.")
 
 
 
@@ -253,7 +253,12 @@ def main():
 
     # Parse arguments and specify logging level
     args = parser.parse_args()
+    handler = logging.FileHandler("{0}.log".format(args.output_prefix), "a")
+    formatter = logging.Formatter("%(asctime)s [%(levelname)-7s] %(message)s")
+    handler.setFormatter(formatter)
+
     logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
+    logger.addHandler(handler)
 
     return args.func(args)
 

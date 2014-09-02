@@ -257,7 +257,7 @@ class SpectralChannel(Model):
         # We can't get the exact model parameters unless we know the observed
         # dispersion range.
         transition_parameters = ("shape", "ld", "sigma")
-        for i, transition_data in enumerate(config["balance"]["atomic_lines"]):
+        for i, transition_data in enumerate(config["classical"]["atomic_lines"]):
             wavelength = transition_data[0]
             if self._data is None \
             or (self._data.disp[-1] >= wavelength >= self._data.disp[0]):
@@ -321,7 +321,7 @@ class SpectralChannel(Model):
             flux = np.ones(len(dispersion))
 
         # Model the absorption profiles!
-        for i, transition_data in enumerate(self.config["balance"]["atomic_lines"]):
+        for i, transition_data in enumerate(self.config["classical"]["atomic_lines"]):
             wavelength = transition_data[0]
             # Negative depth means don't model the line.
             depth = theta.get("ld_{0}".format(i), -1)
@@ -367,7 +367,7 @@ class SpectralChannel(Model):
         or not (10 > theta_dict.get("Vo", 1) > 0):
             return -np.inf
 
-        for i, transition_data in enumerate(self.config["balance"]["atomic_lines"]):
+        for i, transition_data in enumerate(self.config["classical"]["atomic_lines"]):
             #if ("wl_{0}".format(i) in self.parameters \
             #and abs(wavelength - theta_dict["wl_{0}".format(i)]) > wavelength_tolerance) \
             if not (1 >= theta_dict.get("ld_{0}".format(i), 0) >= -1) \
@@ -545,7 +545,7 @@ class SpectralChannel(Model):
 
         # Estimate line absorption parameters.
         if absorption_profile_parameters:
-            for i, transition_data in enumerate(self.config["balance"]["atomic_lines"]):
+            for i, transition_data in enumerate(self.config["classical"]["atomic_lines"]):
                 if "ld_{0}".format(i) in self.parameters:
                     
                     wavelength = transition_data[0]    
@@ -651,7 +651,7 @@ class SpectralChannel(Model):
 
         pre_opt_theta = {}
         pre_opt_theta.update(initial_theta)
-        for i, transition_data in enumerate(self.config["balance"]["atomic_lines"]):
+        for i, transition_data in enumerate(self.config["classical"]["atomic_lines"]):
             if "ld_{0}".format(i) in self.parameters:
                 
                 wavelength = transition_data[0]
@@ -717,7 +717,7 @@ class SpectralChannel(Model):
         #ax.plot(data.disp, opt_spectra[:,1], 'r', label='opt')
 
         t_elapsed = time() - t_init
-        logger.info("Optimisation took {0:.2f} seconds".format(t_elapsed))
+        logger.info("Spectral channel optimisation took {0:.2f} seconds".format(t_elapsed))
 
         if full_output:
             return (op_theta, op_fopt, op_niter, op_funcalls, op_warnflag)
@@ -738,7 +738,7 @@ class SpectralChannel(Model):
         for i, (parameter, value) in enumerate(theta.iteritems()):
             if parameter.startswith("wl_"):
                 index = int(parameter.split("_")[1])
-                approximate_wavelength = self.config["balance"]["atomic_lines"][index][0]
+                approximate_wavelength = self.config["classical"]["atomic_lines"][index][0]
 
                 clipped_theta[parameter] = approximate_wavelength
                 #print("diff", abs(approximate_wavelength - value), abs(wavelength_tolerance - (approximate_wavelength - value)))
@@ -970,11 +970,11 @@ class StellarSpectrum(Model):
             An array of atomic transitions and integrated equivalent widths.
         """
 
-        num_atomic_lines = len(self.config["balance"]["atomic_lines"])
+        num_atomic_lines = len(self.config["classical"]["atomic_lines"])
         tabular_results = np.zeros((num_atomic_lines, 3))
 
         # Fill 'er up.
-        tabular_results[:, :2] = np.array(self.config["balance"]["atomic_lines"])[:, :2]
+        tabular_results[:, :2] = np.array(self.config["classical"]["atomic_lines"])[:, :2]
         tabular_results[:, 2] = np.nan
 
         for optimal_channel_theta in optimal_theta:
@@ -1051,7 +1051,7 @@ class StellarSpectrum(Model):
             initial_stellar_parameters = self.initial_guess_stellar_parameters()
 
         atomic_data = np.core.records.fromarrays(np.hstack([
-                np.array(self.config["balance"]["atomic_lines"]),
+                np.array(self.config["classical"]["atomic_lines"]),
                 equivalent_width_table[:, 2].reshape(-1, 1)
             ]).T,
             names=("wavelength", "species", "excitation_potential", "loggf",
@@ -1117,7 +1117,7 @@ class StellarSpectrum(Model):
             t_elapsed = time() - t_init
             f_op_x = excitation_ionisation_balance(op_x)
             
-            logger.info("Optimisation took {0:.2f} seconds".format(t_elapsed))
+            logger.info("Stellar parameter optimisation took {0:.2f} seconds".format(t_elapsed))
             logger.info("Optimised parameters are: Teff = {0:.0f} K, logg = {2:.3f} "\
                 "[M/H] = {3:.3f}, xi = {1:.3f} km/s".format(*op_x))
             logger.info("Total difference: {0:.2e}".format((f_op_x**2).sum()))
@@ -1818,7 +1818,7 @@ class GenerativeModel(Model):
         self._opt_warn_message(op_warnflag, op_niter, op_nfunc)
 
         t_elapsed = time() - t_init
-        logger.info("Optimisation took {0:.2f} seconds".format(t_elapsed))
+        logger.info("Generative model optimisation took {0:.2f} seconds".format(t_elapsed))
 
         op_theta_dict = dict(zip(self.parameters, op_theta))
 

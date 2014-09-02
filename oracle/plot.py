@@ -482,6 +482,11 @@ def balance(atomic_data_table, title=None):
     line_strength_ax.set_xlabel("Reduced Equivalent Width")
     line_strength_ax.set_ylabel("$\\log_{\\epsilon}({\\rm Fe})$")
 
+    ionisation_difference = np.nanmean(atomic_data_table["abundance"][neutral]) \
+        - np.nanmean(atomic_data_table["abundance"][ionised])
+    logger.info("Mean neutral and ionised abundance difference: {0:.3f} dex".format(
+        ionisation_difference))
+
     if title is not None:
         excitation_ax.set_title(title)
 
