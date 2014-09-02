@@ -49,8 +49,9 @@ def acceptance_fractions(mean_acceptance_fractions, burn=None, **kwargs):
     return fig
 
 
-def spectrum_comparison(data, model, theta, figsize=None, plot_uncertainties=False,
-    observed_color=u"k", model_color=u"b", mask_color=u"r", mask_alpha=0.5):
+def spectrum_comparison(data, model, theta=None, model_spectra=None, figsize=None,
+    plot_uncertainties=False, observed_color=u"k", model_color=u"b", mask_color=u"r",
+    mask_alpha=0.5):
     """
     Produce a comparison plot showing the observed and model spectra.
 
@@ -67,12 +68,19 @@ def spectrum_comparison(data, model, theta, figsize=None, plot_uncertainties=Fal
     :type model:
         :models.Model:
 
-    :param theta:
+    :param theta: [optional]
         The :math:`\Theta` values to use to calculate model spectra for 
-        comparison.
+        comparison. Either ``theta`` or ``model_spectra`` are required.
 
     :type theta:
         dict
+
+    :param model_spectra: [optional]
+        The model spectra to show. Either ``theta`` or ``model_spectra``
+        are required.
+
+    :type model_spectra:
+        list of :class:`specutils.Spectrum1D` objects
 
     :param figsize: [optional]
         A 2 length tuple (width, height) of the figure size in inches.
@@ -109,8 +117,9 @@ def spectrum_comparison(data, model, theta, figsize=None, plot_uncertainties=Fal
     except:
         synth_kwargs = {}
 
-    model_spectra = model(dispersion=[s.disp for s in data], 
-        synth_kwargs=synth_kwargs, **theta)
+    if model_spectra is None:
+        model_spectra = model(dispersion=[s.disp for s in data], 
+            synth_kwargs=synth_kwargs, **theta)
 
     if not isinstance(model_spectra, list):
         model_spectra = [model_spectra]
@@ -121,8 +130,7 @@ def spectrum_comparison(data, model, theta, figsize=None, plot_uncertainties=Fal
     mask = np.array(model.config.get("mask", []))
     # Redshift all mask wavelengths where necessary
     # [TODO] Need to allow for different redshifts in each channel.
-    mask *= 1. + theta.get("z", 0)
-
+    
     for ax, observed_spectrum, model_spectrum \
     in zip(axes, data, model_spectra):
 
