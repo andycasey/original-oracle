@@ -4,12 +4,17 @@
 
 __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 
+import logging
+
 import matplotlib.pyplot as plt
 
 from matplotlib.ticker import MaxNLocator
 import numpy as np
+from scipy import stats
 
 import specutils
+
+logger = logging.getLogger(__name__)
 
 def acceptance_fractions(mean_acceptance_fractions, burn=None, **kwargs):
     """
@@ -401,5 +406,83 @@ def chains(xs, labels=None, truths=None, truth_color=u"#4682b4", burn_in=None,
         if labels is not None:
             ax.set_ylabel(labels[k])
             ax.yaxis.set_label_coords(-0.05, 0.5)
+
+    return fig
+
+
+def balance(atomic_data_table, title=None):
+    """
+    Plot the derived abundances as a function of excitation potential and line
+    strength, as typically done in classical analysis approaches.
+
+    :param atomic_data_table:
+        A record array table containing the wavelength, species, lower excitation
+        potential, oscillator strength (loggf), equivalent width, and abundance
+        of the atomic transitions used for stellar parameter determination.
+
+    """
+
+    fig, axes = plt.subplots(2)
+    excitation_ax, line_strength_ax = axes
+
+    if len(set(atomic_data_table["species"].astype(int))) > 1:
+        logger.warn("Multiple elements found in atomic data table. These will "\
+            "all be plotted as the same symbol for the moment.")
+
+    # Seperate neutral and ionised species.
+    neutral = (atomic_data_table["species"] % 1) == 0
+    ionised = ~neutral
+
+    # Plot the excitation potential axes
+    excitation_ax.scatter(atomic_data_table["excitation_potential"][neutral],
+        atomic_data_table["abundance"][neutral], facecolor="k", zorder=10)
+    excitation_ax.scatter(atomic_data_table["excitation_potential"][ionised],
+        atomic_data_table["abundance"][ionised], facecolor="b", zorder=10)
+
+    # Measure slopes by linear regression [TODO] and show them
+    m, b, r_value, p_value, stderr = stats.linregress(
+        x=atomic_data_table["excitation_potential"],
+        y=atomic_data_table["abundance"])
+
+    x_limits = np.array(excitation_ax.get_xlim())
+    y_limits = excitation_ax.get_ylim()
+    excitation_ax.plot(x_limits, [np.mean(atomic_data_table["abundance"])] * 2, c="#666666")
+    excitation_ax.plot(x_limits, m * x_limits + b, ":", c="k", zorder=-1)
+    excitation_ax.set_xlim(x_limits)
+    excitation_ax.set_ylim(y_limits)
+
+    excitation_ax.set_xlabel("Lower Excitation Potential (eV)")
+    excitation_ax.set_ylabel("$\\log_{\\epsilon}({\\rm Fe})$")
+
+    # [TODO]
+    # Quote the slope on the axes.
+    logger.info("Slope on excitation balance plot: {0:.4f}".format(m))
+
+    # Plot the line strength axes
+    reduced_equivalent_width = np.log(atomic_data_table["equivalent_width"]/atomic_data_table["wavelength"])
+    line_strength_ax.scatter(
+        reduced_equivalent_width[neutral], atomic_data_table["abundance"][neutral],
+        facecolor="k", zorder=10)
+    line_strength_ax.scatter(
+        reduced_equivalent_width[ionised], atomic_data_table["abundance"][ionised],
+        facecolor="b", zorder=10)
+
+    # Measure slopes by linear regression [TODO] and show them
+    m, b, r_value, p_value, stderr = stats.linregress(
+        x=reduced_equivalent_width, y=atomic_data_table["abundance"])
+
+    logger.info("Slope on the reduced equivalent width plot: {0:.4f}".format(m))
+    x_limits = np.array(line_strength_ax.get_xlim())
+    line_strength_ax.plot(x_limits, [np.mean(atomic_data_table["abundance"])] * 2,
+        c="#666666", zorder=-1)
+    line_strength_ax.plot(x_limits, m * x_limits + b, ":", c="k", zorder=-1)
+    line_strength_ax.set_xlim(x_limits)
+    line_strength_ax.set_ylim(y_limits)
+
+    line_strength_ax.set_xlabel("Reduced Equivalent Width")
+    line_strength_ax.set_ylabel("$\\log_{\\epsilon}({\\rm Fe})$")
+
+    if title is not None:
+        excitation_ax.set_title(title)
 
     return fig

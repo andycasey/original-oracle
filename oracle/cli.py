@@ -150,6 +150,15 @@ def solve_classical(args):
 
     logger.info("Full analysis took {0:.2f} seconds".format(time() - t_init))
 
+    if args.plotting:
+        path = image_path("{0}-balance.{1}")
+
+        title = "$T_{\\rm eff} = "
+        fig = plot.balance(op_atomic_data)
+        fig.savefig(path)
+        plt.close(fig)
+
+
     raise a
     posterior, sampler, info = model.infer(data, optimised_parameters)
 
