@@ -1007,6 +1007,39 @@ class StellarSpectrum(Model):
         return tabular_results
 
 
+    def initial_guess_stellar_parameters(self):
+        """
+        Provide a completely random guess of the stellar parameters.
+
+        [TODO] Introduce prior information into this function.
+        """
+
+
+        default_rules = collections.OrderedDict([
+            ("teff", np.random.uniform(3000, 7000)),
+            ("logg", np.random.uniform(0, 5)),
+            ("[M/H]", np.random.uniform(-2, 0)),
+            ("xi", "(1.28 + 3.3e-4 * (teff - 6000) - 0.64 * (logg - 4.5)) "\
+                "if logg > 3.5 else 2.70 - 0.509 * logg"),
+            ("Po", np.random.uniform(0, 1)),
+            ("Vo", abs(np.random.normal(0, 1))),
+            ("Ys", np.random.normal(1, 0.01)),
+        ])
+
+        initial_guess = {}
+        for parameter, rule in default_rules.iteritems():
+
+            if isinstance(rule, float):
+                initial_guess[parameter] = rule
+
+            else:
+                initial_guess[parameter] = eval(rule, initial_guess)
+
+        parameter_order = ("teff", "xi", "logg", "[M/H]")
+
+        return [initial_guess.get(p) for p in parameter_order]
+
+
     def optimise_stellar_parameters(self, equivalent_width_table, 
         initial_stellar_parameters=None, full_output=False):
         """
@@ -1014,7 +1047,8 @@ class StellarSpectrum(Model):
         measured equivalent widths.
         """
 
-        initial_stellar_parameters = [5800.0, 1.05, 2.0, -1.0]
+        if initial_stellar_parameters is None:
+            initial_stellar_parameters = self.initial_guess_stellar_parameters()
 
         atomic_data = np.core.records.fromarrays(np.hstack([
                 np.array(self.config["balance"]["atomic_lines"]),
@@ -1065,9 +1099,7 @@ class StellarSpectrum(Model):
                 # [TODO] Remove hard coding.
 
                 results = np.array([excitation_balance, line_strength_balance,
-                    0.10 * ionisation_state, 0.10 * abundance_state])
-
-                print(theta, results, (results**2).sum())
+                    ionisation_state, abundance_state])
                 return results
 
             op_kwargs = {
@@ -1083,7 +1115,13 @@ class StellarSpectrum(Model):
                 initial_stellar_parameters, **op_kwargs)
 
             t_elapsed = time() - t_init
+            f_op_x = excitation_ionisation_balance(op_x)
+            
             logger.info("Optimisation took {0:.2f} seconds".format(t_elapsed))
+            logger.info("Optimised parameters are: Teff = {0:.0f} K, logg = {2:.3f} "\
+                "[M/H] = {3:.3f}, xi = {1:.3f} km/s".format(*op_x))
+            logger.info("Total difference: {0:.2e}".format((f_op_x**2).sum()))
+            print(f_op_x)
 
             if full_output:
                 op_atomic_data = moogsilent.abfind(op_x[0], op_x[2], op_x[3], op_x[1], 
