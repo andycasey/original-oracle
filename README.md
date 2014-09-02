@@ -1,7 +1,10 @@
 **oracle, the suppository of all wisdom**
 ============================================
 
-**Getting Started**
+**[Check out the current to do list](https://github.com/andycasey/oracle/wiki/TODO)**
+
+
+**Installation**
 
 1. [This guide](https://help.github.com/articles/set-up-git) will step you through installing git,
    and will show you how to set up ``git`` with your GitHub credentials so that you can access 
@@ -22,8 +25,6 @@
    # OR if you have sudo access:
    sudo python setup.py install 
    ````
-
-
 
 **Updating ``oracle``**
 
