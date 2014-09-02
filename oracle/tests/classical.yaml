@@ -234,7 +234,7 @@ mask:
  - [7886.438, 7891.096]
  - [7891.616, 7900.000]
 
-balance:
+classical:
   wavelength_tolerance: 0.0
   wavelength_contribution: 0.20
   atomic_lines:

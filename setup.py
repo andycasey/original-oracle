@@ -69,5 +69,7 @@ setup(name="oracle",
     entry_points={
         "console_scripts": ["oracle = oracle.cli:main"]
     },
-    scripts=["si/si_lineform"]
+    scripts=["si/si_lineform"],
+    include_package_data=True,
+    package_data={'': ['*.dat']}
 )
