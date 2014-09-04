@@ -146,7 +146,8 @@ def solve_classical(args):
 
     atomic_data = model.integrate_profiles(optimised_model_parameters)
     op_x, op_atomic_data = model.optimise_stellar_parameters(atomic_data,
-        full_output=True)
+        full_output=True, ftol=model.config["classical"].get("tolerance", 4e-3),
+        maxiter=model.config["classical"].get("maxiter", 3))
 
     if not np.isfinite(op_x).all():
         logger.info("Unable to determine stellar parameters")
