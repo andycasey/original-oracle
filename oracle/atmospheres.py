@@ -1156,8 +1156,7 @@ class AtmosphereInterpolator:
             raise
             
         if np.all(np.isnan(interpolated_deck)):
-            print point, interpolated_point
-            raise ValueError("It appears QHull interpolation has fallen over. Try different stellar parameters *and* tell Andy about this.")
+            raise ValueError("QHull interpolation fell over")
         
         if isinstance(deck, np.core.records.recarray):
             interpolated_deck = np.core.records.fromarrays(interpolated_deck.T,

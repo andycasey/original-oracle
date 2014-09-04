@@ -1016,7 +1016,7 @@ class StellarSpectrum(Model):
 
 
         default_rules = collections.OrderedDict([
-            ("teff", np.random.uniform(3000, 7000)),
+            ("teff", np.random.uniform(4000, 7000)),
             ("logg", np.random.uniform(0, 5)),
             ("[M/H]", np.random.uniform(-2, 0)),
             ("xi", "(1.28 + 3.3e-4 * (teff - 6000) - 0.64 * (logg - 4.5)) "\
@@ -1040,8 +1040,8 @@ class StellarSpectrum(Model):
         return [initial_guess.get(p) for p in parameter_order]
 
 
-    def optimise_stellar_parameters(self, equivalent_width_table, 
-        initial_stellar_parameters=None, full_output=False):
+    def optimise_stellar_parameters(self, equivalent_width_table, maxiter=3,
+        ftol=1e-3, initial_stellar_parameters=None, full_output=False):
         """
         Optimise stellar parameters (Teff, logg, [Fe/H], xi) given some 
         measured equivalent widths.
@@ -1073,7 +1073,6 @@ class StellarSpectrum(Model):
             with open(line_list_filename, "w") as fp:
                 fp.write(moogsilent._format_ew_input(atomic_data[finite]))
             
-
             def excitation_ionisation_balance(theta):
                 temperature, xi, logg, metallicity = theta
 
@@ -1115,19 +1114,45 @@ class StellarSpectrum(Model):
                 "fprime": utils.stellar_jacobian,
                 "full_output": True # Necessary for introspection and provenance.
             }
-            t_init = time()
-            op_x, infodict, ier, mesg = op.fsolve(excitation_ionisation_balance,
-                initial_stellar_parameters, **op_kwargs)
 
-            t_elapsed = time() - t_init
-            f_op_x = excitation_ionisation_balance(op_x)
-            
+            ftol_achieved = False
+            for i in range(maxiter):
+                logger.info("Starting on iteration {0}".format(i + 1))
+
+                t_init = time()
+                op_x, infodict, ier, mesg = op.fsolve(excitation_ionisation_balance,
+                    initial_stellar_parameters, **op_kwargs)
+
+                t_elapsed = time() - t_init
+                f_op_x = excitation_ionisation_balance(op_x)
+                f_op_x_sum = np.abs(f_op_x).sum()
+
+                if np.isfinite(f_op_x_sum) and ftol >= f_op_x_sum:
+                    ftol_achieved = True
+                    break
+
+                else:
+                    logger.warn("Convergence tolerance not achieved {0:.2e} > "\
+                        "{1:.2e} in iteration {2}".format(f_op_x_sum, ftol,
+                            i + 1))
+
+            if not ftol_achieved:
+                logger.warn("Convergence tolerance not achieved after maximum "\
+                    "number of iterations ({0})".format(maxiter))
+                logger.warn("Optimised parameters are: Teff = N/A K, logg = N/A, "\
+                    "[M/H] = N/A, xi = N/A km/s")
+
+                if full_output:
+                    return np.array([np.nan]*len(initial_stellar_parameters)), atomic_data
+                return np.array([np.nan]*len(initial_stellar_parameters))
+
+            logger.info("Tolerance ({0:.2e} > {1:.2e}) achieved after {2} iteration{3}".format(
+                ftol, f_op_x_sum, i + 1, ["", "s"][i > 0]))
             logger.info("Stellar parameter optimisation took {0:.2f} seconds".format(t_elapsed))
             logger.info("Optimised parameters are: Teff = {0:.0f} K, logg = {2:.3f} "\
                 "[M/H] = {3:.3f}, xi = {1:.3f} km/s".format(*op_x))
-            logger.info("Total difference: {0:.2e}".format((f_op_x**2).sum()))
-            print(f_op_x)
-
+            logger.info("Total squared difference: {0:.2e}".format((f_op_x**2).sum()))
+            
             if full_output:
                 op_atomic_data = moogsilent.abfind(op_x[0], op_x[2], op_x[3], op_x[1], 
                     line_list_filename, clobber=True)

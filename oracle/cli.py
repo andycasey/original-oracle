@@ -148,6 +148,12 @@ def solve_classical(args):
     op_x, op_atomic_data = model.optimise_stellar_parameters(atomic_data,
         full_output=True)
 
+    if not np.isfinite(op_x).all():
+        logger.info("Unable to determine stellar parameters")
+        logger.info("Full analysis {1}took {0:.2f} seconds".format(time() - t_init,
+            ["", "(including plotting) "][args.plotting]))
+        return None
+
     if args.plotting:
         path = image_path("{0}-balance.{1}")
 
