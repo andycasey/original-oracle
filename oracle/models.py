@@ -1041,7 +1041,7 @@ class StellarSpectrum(Model):
 
 
     def optimise_stellar_parameters(self, equivalent_width_table, maxiter=3,
-        ftol=1e-3, initial_stellar_parameters=None, full_output=False):
+        ftol=4e-3, initial_stellar_parameters=None, full_output=False):
         """
         Optimise stellar parameters (Teff, logg, [Fe/H], xi) given some 
         measured equivalent widths.
