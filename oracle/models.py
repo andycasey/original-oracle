@@ -1050,11 +1050,6 @@ class StellarSpectrum(Model):
         if initial_stellar_parameters is None:
             initial_stellar_parameters = self.initial_guess_stellar_parameters()
 
-        logger.info("Initial stellar parameters are Teff = {0:.0f} K, logg = "\
-            "{1:.3f}, [M/H] = {2:.3f}, xi = {3:.3f} km/s".format(
-                initial_stellar_parameters[0], initial_stellar_parameters[2],
-                initial_stellar_parameters[3], initial_stellar_parameters[1]))
-
         atomic_data = np.core.records.fromarrays(np.hstack([
                 np.array(self.config["classical"]["atomic_lines"]),
                 equivalent_width_table[:, 2].reshape(-1, 1)
@@ -1119,6 +1114,11 @@ class StellarSpectrum(Model):
             for i in range(maxiter):
                 logger.info("Starting on iteration {0}".format(i + 1))
 
+                logger.info("Initial stellar parameters are Teff = {0:.0f} K, logg = "\
+                    "{1:.3f}, [M/H] = {2:.3f}, xi = {3:.3f} km/s".format(
+                        initial_stellar_parameters[0], initial_stellar_parameters[2],
+                        initial_stellar_parameters[3], initial_stellar_parameters[1]))
+
                 t_init = time()
                 op_x, infodict, ier, mesg = op.fsolve(excitation_ionisation_balance,
                     initial_stellar_parameters, **op_kwargs)
@@ -1132,6 +1132,7 @@ class StellarSpectrum(Model):
                     break
 
                 else:
+                    initial_stellar_parameters = self.initial_guess_stellar_parameters()
                     logger.warn("Convergence tolerance not achieved {0:.2e} > "\
                         "{1:.2e} in iteration {2}".format(f_op_x_sum, ftol,
                             i + 1))
