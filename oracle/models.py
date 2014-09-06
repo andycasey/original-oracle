@@ -71,9 +71,17 @@ class Model(object):
                 # Probably a string configuration.
                 try:
                     self.config = yaml.load(configuration)
+
                 except:
-                    raise IOError("configuration file does not exist or the "\
-                        "string configuration is not valid YAML")
+                    raise IOError("configuration file does not exist or the"\
+                        " YAML string provided does not describe a valid "\
+                        "dictionary")
+                else:
+                    # We expect a dictionary.
+                    if not isinstance(self.config, dict):
+                        raise IOError("configuration file does not exist or the"\
+                            " YAML string provided does not describe a valid "\
+                            "dictionary")
             else:
                 with open(configuration, "r") as fp:
                     self.config = yaml.load(fp)
@@ -759,7 +767,8 @@ class SpectralChannel(Model):
 
         return clipped_theta
 
-    def infer(self, data, opt_theta, walkers=-1, burn=400, sample=100, threads=16,
+
+    def infer(self, data, opt_theta, walkers=200, burn=400, sample=100, threads=1,
         **kwargs):
         """
         Infer the model parameters given the data.
@@ -768,10 +777,12 @@ class SpectralChannel(Model):
             The initial starting point of theta.
 
         :type opt_theta:
-            :class:`numpy.ndarray`
+            dict
 
         :param walkers:
-            The number of Goodman & Weare (2010) ensemble walkers.
+            The number of Goodman & Weare (2010) ensemble walkers. If a negative
+            value is given then the number of walkers will be set by ``-walkers 
+            * len(parameters)``. 
 
         :type walkers:
             int
@@ -806,12 +817,13 @@ class SpectralChannel(Model):
 
         assert len(self.parameters) > 0
 
-        walkers = walkers if walkers > 0 else 2*len(opt_theta)
+        walkers = walkers if walkers > 0 else -walkers*len(opt_theta)
+        logger.debug("Initialising {0} walkers for {1} parameters".format(
+            walkers, len(self.parameters)))
 
-        p0 = emcee.utils.sample_ball(opt_theta, [1e-3]*len(opt_theta),
+        p0 = emcee.utils.sample_ball(
+            [opt_theta.get(p) for p in self.parameters], [1e-3] * len(opt_theta),
             size=walkers)
-
-        p0_orig = p0.copy()
 
         # Do reflections so that we have a reasonable initial starting point.
         limits = {
@@ -955,15 +967,19 @@ class StellarSpectrum(Model):
 
         
 
-    def integrate_profiles(self, optimal_theta, xlimits=1):
+    def integrate_profiles(self, channel_thetas, xlimits=1):
         """
         Integrate measured absorption profiles to find equivalent widths for all
         atomic absorption lines in the current model.
 
-        :param optimal_theta:
-            The optimised model parameters for each channel.
+        :param channel_thetas:
+            The optimised model parameters for each channel. The list contains
+            dictionaries with parameters (as keys) and values for each channel.
+            The values can either be a single float (e.g., the optimised value)
+            or a two- or three-length tuple containing the value and associated 
+            uncertainties.
 
-        :type optimal_theta:
+        :type channel_thetas:
             list of dicts
 
         :returns:
@@ -977,9 +993,9 @@ class StellarSpectrum(Model):
         tabular_results[:, :2] = np.array(self.config["classical"]["atomic_lines"])[:, :2]
         tabular_results[:, 2] = np.nan
 
-        for optimal_channel_theta in optimal_theta:
+        for channel_theta in channel_thetas:
 
-            for parameter, value in optimal_channel_theta.iteritems():
+            for parameter, parameter_value in channel_theta.iteritems():
                 # Identify a line.
                 if parameter.startswith("ld_"):
                     transition_index = int(parameter.split("_")[1])
@@ -994,9 +1010,9 @@ class StellarSpectrum(Model):
                                 tabular_results[transition_index, -1]))
 
                     # Integrate the profile.
-                    depth = value
-                    shape = optimal_channel_theta["shape_{0}".format(transition_index)]
-                    sigma = optimal_channel_theta["sigma_{0}".format(transition_index)]
+                    depth = parameter_value
+                    shape = channel_theta["shape_{0}".format(transition_index)]
+                    sigma = channel_theta["sigma_{0}".format(transition_index)]
                     y = lambda x: depth * profiles.voigt(wavelength, sigma, shape, x)
                     equivalent_width, integration_error_est = integrate.quad(y,
                         wavelength - xlimits, wavelength + xlimits)
@@ -1040,8 +1056,9 @@ class StellarSpectrum(Model):
         return [initial_guess.get(p) for p in parameter_order]
 
 
-    def optimise_stellar_parameters(self, equivalent_width_table, maxiter=3,
-        ftol=4e-3, initial_stellar_parameters=None, full_output=False):
+    def optimise_stellar_parameters(self, equivalent_width_table,
+        species=(26.0, 26.1), maxiter=3, ftol=4e-3, 
+        initial_stellar_parameters=None, full_output=False):
         """
         Optimise stellar parameters (Teff, logg, [Fe/H], xi) given some 
         measured equivalent widths.
@@ -1057,6 +1074,21 @@ class StellarSpectrum(Model):
             names=("wavelength", "species", "excitation_potential", "loggf",
                 "equivalent_width"),
             formats=["f8"] * 5)
+
+        indices = np.zeros(len(atomic_data), dtype=bool)
+        # It bothers me immensely that the singular and plural of species are
+        # identical.
+        for each in species:
+            indices[atomic_data["species"] == each] += 1
+
+        if 2 > indices.sum():
+            raise ValueError("less than two transitions identified for stellar "\
+                "parameter determination")
+
+        atomic_data = atomic_data[indices]
+        logger.info("Identified {0} transitions of species {1} to use for stellar"\
+            " parameter determination".format(
+                len(atomic_data), ", ".join(map(str, species))))
 
         # Create an instance of MOOGSILENT.
         with moog.instance(debug=True) as moogsilent:
@@ -1076,7 +1108,7 @@ class StellarSpectrum(Model):
                         temperature, logg, metallicity, xi, line_list_filename,
                         clobber=True)
                 except:
-                    return np.array([-np.inf]*4)
+                    return np.array([np.inf]*4)
 
                 # Excitation balance.
                 excitation_balance = stats.linregress(
