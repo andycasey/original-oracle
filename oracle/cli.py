@@ -139,10 +139,28 @@ def solve_classical(args):
     if args.plotting:
         path = image_path("{0}-optimised.{1}")
 
-        model_spectra = [c(s.disp, **theta) for c, s, theta in zip(model.channels, data, optimised_model_parameters)]
+        model_spectra = [c(s.disp, **theta) for c, s, theta in \
+            zip(model.channels, data, optimised_model_parameters)]
         fig = plot.spectrum_comparison(data, model, model_spectra=model_spectra)
         fig.savefig(path)
+        logger.info("Saved figure to {0}".format(path))
         plt.close(fig)
+
+    # Infer the channel parameters
+    #posterior_model_parameters = model.infer(data, optimised_model_parameters)
+
+    # Plot the inferred spectrum with uncertainties, etc.
+    if args.plotting:
+        path = image_path("{0}-inferred.{1}")
+
+
+
+    #import triangle
+    #fig = plot.projection(moobar[1], model.channels[0], [data[0]], n=1000,
+    #    figsize=(25,4), plot_uncertainties=True)
+    #plt.show()
+    #raise a
+
 
     atomic_data = model.integrate_profiles(optimised_model_parameters)
     op_x, op_atomic_data = model.optimise_stellar_parameters(atomic_data,
@@ -161,11 +179,11 @@ def solve_classical(args):
         title = "$T_{\\rm eff} = "
         fig = plot.balance(op_atomic_data)
         fig.savefig(path)
+        logger.info("Saved figure to {0}".format(path))
         plt.close(fig)
 
     logger.info("Full analysis {1}took {0:.2f} seconds".format(time() - t_init,
         ["", "(including plotting) "][args.plotting]))
-
 
     #posterior, sampler, info = model.infer(data, optimised_parameters)
     logger.info("Fin.")
