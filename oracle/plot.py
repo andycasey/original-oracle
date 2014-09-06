@@ -146,7 +146,7 @@ def spectrum_comparison(data, model, theta=None, model_spectra=None, figsize=Non
             ax.errorbar(observed_spectrum.disp, observed_spectrum.flux,
                 yerr=observed_spectrum.variance**0.5, fmt=None, ecolor=observed_color)
         ax.plot(observed_spectrum.disp, observed_spectrum.flux, observed_color)
-        ax.plot()
+        
         
         # Show the mask
         obs_start, obs_end = observed_spectrum.disp[0], observed_spectrum.disp[-1]
@@ -164,7 +164,8 @@ def spectrum_comparison(data, model, theta=None, model_spectra=None, figsize=Non
     return fig
 
 
-def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None):
+def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None,
+    plot_uncertainties=False):
     """
     Project the maximum likelihood values and sampled posterior points as spectra.
 
@@ -204,6 +205,12 @@ def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None
 
     :type figsize:
         tuple or None
+
+    :param plot_uncertainties: [optional]
+        Plot uncertainties in the data.
+
+    :type plot_uncertainties:
+        bool
 
     :raises ValueError:
         If a ``fig`` is provided with the incorrect number of axes.
@@ -285,6 +292,10 @@ def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None
 
         # Plot the data
         ax.plot(observed_spectrum.disp, observed_spectrum.flux, color="k")
+
+        if plot_uncertainties:
+            ax.errorbar(observed_spectrum.disp, observed_spectrum.flux,
+                yerr=observed_spectrum.variance**0.5, fmt=None, ecolor="k")
 
         # By default only show common overlap between the model and spectral data
         if extents is None:
