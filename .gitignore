@@ -14,4 +14,4 @@ dist/
 *.jpg
 *.pdf
 
-oracle/tests/data/benchmarks/
+oracle/tests/data/*
