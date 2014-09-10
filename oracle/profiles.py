@@ -424,6 +424,9 @@ class AbsorptionProfile(object):
             "Vo": 0.01,
             "Yo": np.median(continuum)
         }
+
+        if ~np.isfinite(theta["ld"]):
+            theta["ld"] = 0.
         return dict(zip(self.parameters, [theta[p] for p in self.parameters]))
 
 
