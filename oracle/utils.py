@@ -177,7 +177,28 @@ def lru_cache(maxsize=128, typed=False):
         wrapper.cache_clear = cache_clear
         return update_wrapper(wrapper, user_function)
 
-    return decorating_functio
+    return decorating_function
+
+
+def rounder(*decimals):
+    def decorator(function):
+        def wrapper(*args, **kwargs):
+            
+            rounded_args = []
+            for arg, decimal in zip(args, decimals):
+                if decimal is None:
+                    rounded_args.append(arg)
+                else:
+                    rounded_args.append(np.round(arg, decimal))
+
+            # Extend with arguments that don't have precision requirements
+            missing_args = len(args) - len(rounded_args)
+            if missing_args > 0:
+                rounded_args.extend(args[-missing_args:])
+
+            return function(*rounded_args, **kwargs)
+        return wrapper
+    return decorator
 
 
 def stellar_jacobian(stellar_parameters, *args):
