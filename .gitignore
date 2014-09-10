@@ -9,9 +9,10 @@ dist/
 *.egg-info/
 *.pyc
 
-# Ignore (output) images
+# Ignore (output)
 *.png
 *.jpg
 *.pdf
+*.log
 
 oracle/tests/data/*
