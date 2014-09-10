@@ -193,6 +193,15 @@ class instance(object):
             # [TODO]: Ignoring van Der Waal damping coefficients for the moment << implement if they exist!
             output += line.format(*[measurement[col] for col in ["wavelength", "species",
                 "excitation_potential", "loggf", "equivalent_width"]])
+
+            # [TODO]: Allow asymmetric uncertainties
+            uncertainty_keys = ("u_pos_equivalent_width", "u_neg_equivalent_width")
+            for uncertainty_key in uncertainty_keys:
+                line_data = [measurement[col] for col in ["wavelength", "species",
+                    "excitation_potential", "loggf", "equivalent_width"]]
+                # Add the associated uncertainty to the equivalent width
+                line_data[-1] += measurement[uncertainty_key]
+                output += line.format(*line_data)
     
         return output
         
@@ -228,7 +237,8 @@ class instance(object):
 
         data = []
         columns = ("wavelength", "species", "excitation_potential", "loggf",
-            "equivalent_width", "abundance")
+            "equivalent_width", "abundance", "u_pos_equivalent_width",
+            "u_neg_equivalent_width", "u_pos_abundance", "u_neg_abundance")
 
         for i, line in enumerate(output):
             if line.startswith("Abundance Results for Species "):
@@ -253,6 +263,37 @@ class instance(object):
 
                 # Insert a species column
                 line_data.insert(1, current_species)
+
+                # Does this line (wavelength + species) already exist in the 
+                # data table? If so then we are dealing with uncertainties.
+                if len(data) > 0:
+                    matches = np.all(np.less_equal(np.abs(np.array(data)[:, :2] - line_data[:2]),
+                        [0.005, 0.05]), axis=1)
+
+                    if matches.sum() >= 3:
+                        raise ValueError("Same transition ({0} at {1} Angstrom)"\
+                            " was provided in the line list with {2} equivalent"\
+                            " widths".format(line_data[1], line_data[0], 
+                                matches.sum() + 1))
+
+                    if np.any(matches):
+                        # Add this to the previous point as an uncertainty.
+                        index = np.where(matches)[0]
+                        if not np.isfinite(data[index][-4]):
+                            # u_pos_equivalent_width
+                            data[index][-4] = line_data[-2] - data[index][4]
+                            # u_pos_abundance
+                            data[index][-2] = line_data[-1] - data[index][5]
+
+                        else:
+                            # u_neg_equivalent_width
+                            data[index][-3] = line_data[-2] - data[index][4]
+                            # u_neg_abundance
+                            data[index][-1] = line_data[-1] - data[index][5]
+                        continue
+
+                # Append nans as uncertainties
+                line_data.extend([np.nan, np.nan, np.nan, np.nan])
                 data.append(line_data)
                 continue
 

@@ -5,6 +5,7 @@
 __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 
 import collections
+import itertools
 import logging
 import multiprocessing as mp
 import os
@@ -44,6 +45,64 @@ _log_prior_eval_environment = {
     "uniform": lambda a, b: partial(stats.uniform.logpdf, **{"loc": a, "scale": b - a}),
     "normal": lambda a, b: partial(stats.norm.logpdf, **{"loc": a, "scale": b})
 }
+
+def line_lnlike(theta, x, y, yerr):
+
+    m, b, Po, Yo, Vo = theta
+
+    line_model = m * x + b
+    line_ivar = 1.0/(yerr**2)
+    outlier_model = Yo
+    outlier_ivar = 1.0/(yerr**2 + Vo)
+
+    model_likelihood = -0.5 * ((y - line_model)**2 * line_ivar - np.log(line_ivar))
+    outlier_likelihood = -0.5 * ((y - outlier_model)**2 * outlier_ivar - np.log(outlier_ivar))
+
+    return np.nansum(np.logaddexp(
+        np.log(1 - Po) + model_likelihood,
+        np.log(Po) + outlier_likelihood
+    ))
+
+
+def line_lnprior(theta):
+
+    m, b, Po, Yo, Vo = theta
+    if not (1 >= Po >= 0) or 0 >= Vo:
+        return -np.inf
+    return 0
+
+
+def line_lnprob(theta, x, y, yerr):
+    return line_lnprior(theta) + line_lnlike(theta, x, y, yerr)
+
+
+
+def fit_line(x, y, y_uncertainty=None, outliers=True, full_output=False):
+
+    if y_uncertainty is None or not np.all(np.isfinite(y_uncertainty)):
+        if full_output:
+            return stats.linregress(x=x, y=y)
+        return stats.linregress(x=x, y=y)[0]
+
+    A = np.vstack((np.ones_like(x), x)).T
+    C = np.diag(y_uncertainty * y_uncertainty)
+    cov = np.linalg.inv(np.dot(A.T, np.linalg.solve(C, A)))
+    b, m = np.dot(cov, np.dot(A.T, np.linalg.solve(C, y)))
+
+    # Should we be modelling outliers?
+    if outliers:
+        theta_init = m, b, 0.1, np.median(y), 0.10
+        theta_opt = op.minimize(lambda *args: -line_lnprob(*args), theta_init,
+            args=(x, y, y_uncertainty))
+
+        if full_output:
+            return theta_opt
+
+        return theta_opt["x"][0]
+
+    if full_output:
+        return m, b
+    return m
 
 class Model(object):
 
@@ -561,10 +620,13 @@ class SpectralChannel(Model):
                     line_continuum = continuum if isinstance(continuum, (int, float)) \
                         else continuum[index]
 
-                    initial_theta["ld_{0}".format(i)] = \
-                        line_continuum - data.flux[index]
+                    line_depth = line_continuum - data.flux[index]
+                    if not np.isfinite(line_depth):
+                        line_depth = 0.
+                    initial_theta["ld_{0}".format(i)] = line_depth
                     initial_theta["sigma_{0}".format(i)] = 0.05
                     initial_theta["shape_{0}".format(i)] = 0.50
+
 
         # Some final defaults.
         initial_theta.update({
@@ -573,7 +635,8 @@ class SpectralChannel(Model):
             "Yo": np.median(continuum),
             "z": 0. # [TODO]
         })
-        return dict(zip(self.parameters, [initial_theta.get(p, np.nan) \
+
+        return dict(zip(self.parameters, [initial_theta.get(p, 0) \
             for p in self.parameters]))
 
 
@@ -668,8 +731,8 @@ class SpectralChannel(Model):
                 # Only supply +/- 1 or 2 Angstroms
                 # [TODO]
                 indices = data.disp.searchsorted([
-                    wavelength - 0.3,
-                    wavelength + 0.3
+                    wavelength - 0.4,
+                    wavelength + 0.4
                 ])
                 _data = specutils.Spectrum1D(disp=data.disp.__getslice__(*indices),
                     flux=data.flux.__getslice__(*indices),
@@ -727,6 +790,9 @@ class SpectralChannel(Model):
         t_elapsed = time() - t_init
         logger.info("Spectral channel optimisation took {0:.2f} seconds".format(t_elapsed))
 
+        if np.any(~np.isfinite(np.array(opt_theta.values()))):
+            raise a
+
         if full_output:
             return (op_theta, op_fopt, op_niter, op_funcalls, op_warnflag)
         return opt_theta
@@ -768,7 +834,7 @@ class SpectralChannel(Model):
         return clipped_theta
 
 
-    def infer(self, data, opt_theta, walkers=200, burn=400, sample=100, threads=1,
+    def infer(self, data, opt_theta, walkers=-2, burn=100, sample=100, threads=1,
         **kwargs):
         """
         Infer the model parameters given the data.
@@ -877,7 +943,7 @@ class SpectralChannel(Model):
         lnprobability = np.concatenate([lnprobability, sampler.lnprobability], axis=1)
 
         # Get the quantiles.
-        posteriors = dict(zip(self.parameters, map(lambda v: (v[1], v[2]-v[1], v[1]-v[0]),
+        posteriors = dict(zip(self.parameters, map(lambda v: (v[1], v[2]-v[1], v[0]-v[1]),
             zip(*np.percentile(sampler.chain.reshape(-1, len(self.parameters)), [16, 50, 84], axis=0)))))
 
         info = {
@@ -965,7 +1031,42 @@ class StellarSpectrum(Model):
 
         return [c.optimise(d) for c, d in zip(self.channels, data)]
 
-        
+
+    def infer(self, data, optimised_theta):
+        """
+        Infer the model parameters (e.g., continuum, line profile parameters) of
+        all the :class:`SpectralChannel` models associated with this :class:`StellarSpectrum`
+        class.
+
+        :param data:
+            The observed data.
+
+        :type data:
+            list of :class:`specutils.Spectrum1D` objects
+
+        :param optimised_theta:
+            The optimised values of the model parameters :math:`\\Theta` for each
+            of the :class:`SpectralChannel` channels.
+
+        :type optimised_theta:
+            list of dict objects
+        """
+
+        # Parallelise this? One arm per core?
+        return [c.infer(s, t) for c, s, t in zip(self.channels, data, optimised_theta)]
+
+        results = []
+        for i, (c, s, t) in enumerate(zip(self.channels, data, optimised_theta)):
+            try:
+                results.append(c.infer(s, t))
+            except:
+                print(i)
+                print(t)
+                raise a
+
+        return results
+
+
 
     def integrate_profiles(self, channel_thetas, xlimits=1):
         """
@@ -976,8 +1077,8 @@ class StellarSpectrum(Model):
             The optimised model parameters for each channel. The list contains
             dictionaries with parameters (as keys) and values for each channel.
             The values can either be a single float (e.g., the optimised value)
-            or a two- or three-length tuple containing the value and associated 
-            uncertainties.
+            or a two- or three-length tuple first containing the value and then
+            the associated positive and negative uncertainties.
 
         :type channel_thetas:
             list of dicts
@@ -987,14 +1088,13 @@ class StellarSpectrum(Model):
         """
 
         num_atomic_lines = len(self.config["classical"]["atomic_lines"])
-        tabular_results = np.zeros((num_atomic_lines, 3))
+        tabular_results = np.zeros((num_atomic_lines, 5))
 
         # Fill 'er up.
         tabular_results[:, :2] = np.array(self.config["classical"]["atomic_lines"])[:, :2]
-        tabular_results[:, 2] = np.nan
+        tabular_results[:, 2:] = np.nan
 
         for channel_theta in channel_thetas:
-
             for parameter, parameter_value in channel_theta.iteritems():
                 # Identify a line.
                 if parameter.startswith("ld_"):
@@ -1009,18 +1109,65 @@ class StellarSpectrum(Model):
                                 utils.element(atomic_number), wavelength,
                                 tabular_results[transition_index, -1]))
 
-                    # Integrate the profile.
-                    depth = parameter_value
-                    shape = channel_theta["shape_{0}".format(transition_index)]
-                    sigma = channel_theta["sigma_{0}".format(transition_index)]
-                    y = lambda x: depth * profiles.voigt(wavelength, sigma, shape, x)
-                    equivalent_width, integration_error_est = integrate.quad(y,
-                        wavelength - xlimits, wavelength + xlimits)
+                    # Do we have a single value, or do we have quantiles?
+                    if isinstance(parameter_value, (float, int)):
+                        # Integrate the profile.
+                        depth = parameter_value
+                        shape = channel_theta["shape_{0}".format(transition_index)]
+                        sigma = channel_theta["sigma_{0}".format(transition_index)]
+                        y = lambda x: depth * profiles.voigt(wavelength, sigma, shape, x)
+                        equivalent_width, integration_error_est = integrate.quad(y,
+                            wavelength - xlimits, wavelength + xlimits)
 
-                    # Save it (in mA)
-                    tabular_results[transition_index, -1] = equivalent_width * 1000.
+                        # Save it (in mA)
+                        equivalent_width *= 1000.
+                        tabular_results[transition_index, 2] = equivalent_width
 
-        return tabular_results
+                    else:
+                        depth = parameter_value[0]
+                        shape = channel_theta["shape_{0}".format(transition_index)][0]
+                        sigma = channel_theta["sigma_{0}".format(transition_index)][0]
+                        y = lambda x: depth * profiles.voigt(wavelength, sigma, shape, x)
+                        equivalent_width, integration_error_est = integrate.quad(y,
+                            wavelength - xlimits, wavelength + xlimits)
+                        equivalent_width *= 1000.
+
+                        tabular_results[transition_index, 2] = equivalent_width
+
+                        # Create permutations of the profile, given the parameters.
+                        depths = np.array(parameter_value)
+                        sigmas = np.array(channel_theta["sigma_{0}".format(transition_index)])
+                        shapes = np.array(channel_theta["shape_{0}".format(transition_index)])
+                        permutations = itertools.product(
+                            depths[0] + depths[1:],
+                            sigmas[0] + sigmas[1:],
+                            shapes[0] + shapes[1:]
+                        )
+                        print("DEPTHS", depths[0], depths[1:])
+                        equivalent_widths = []
+                        for depth, sigma, shape in permutations:
+                            y = lambda x: depth * profiles.voigt(wavelength, sigma, shape, x)
+                            integral, integration_error_est = integrate.quad(
+                                y, wavelength - xlimits, wavelength + xlimits)
+                            equivalent_widths.append(1000. * integral)
+
+
+                        # Take the minimum and maximum values as projected quantiles.
+                        # Restrict equivalent widths to be [0, infinity)
+                        print(equivalent_width, np.min(equivalent_widths), np.max(equivalent_widths))
+                        tabular_results[transition_index, 3:] = np.array([
+                            np.max(equivalent_widths),
+                            np.min(equivalent_widths)
+                        ]) - equivalent_width
+        
+        return np.core.records.fromarrays(np.hstack([
+                np.array(self.config["classical"]["atomic_lines"]),
+                tabular_results[:, 2:].reshape(-1, 3)
+            ]).T,
+            names=("wavelength", "species", "excitation_potential", "loggf",
+                "equivalent_width", "u_pos_equivalent_width", 
+                "u_neg_equivalent_width"),
+            formats=["f8"] * 7)
 
 
     def initial_guess_stellar_parameters(self):
@@ -1056,9 +1203,8 @@ class StellarSpectrum(Model):
         return [initial_guess.get(p) for p in parameter_order]
 
 
-    def optimise_stellar_parameters(self, equivalent_width_table,
-        species=(26.0, 26.1), maxiter=3, ftol=4e-3, 
-        initial_stellar_parameters=None, full_output=False):
+    def optimise_stellar_parameters(self, atomic_data, species=(26.0, 26.1), 
+        initial_stellar_parameters=None, maxiter=3, ftol=4e-3, full_output=False):
         """
         Optimise stellar parameters (Teff, logg, [Fe/H], xi) given some 
         measured equivalent widths.
@@ -1067,17 +1213,9 @@ class StellarSpectrum(Model):
         if initial_stellar_parameters is None:
             initial_stellar_parameters = self.initial_guess_stellar_parameters()
 
-        atomic_data = np.core.records.fromarrays(np.hstack([
-                np.array(self.config["classical"]["atomic_lines"]),
-                equivalent_width_table[:, 2].reshape(-1, 1)
-            ]).T,
-            names=("wavelength", "species", "excitation_potential", "loggf",
-                "equivalent_width"),
-            formats=["f8"] * 5)
-
+        # It *really* bothers me immensely that the singular and plural of the 
+        # word 'species' are identical.
         indices = np.zeros(len(atomic_data), dtype=bool)
-        # It bothers me immensely that the singular and plural of species are
-        # identical.
         for each in species:
             indices[atomic_data["species"] == each] += 1
 
@@ -1108,27 +1246,45 @@ class StellarSpectrum(Model):
                         temperature, logg, metallicity, xi, line_list_filename,
                         clobber=True)
                 except:
+                    logger.exception("Failed to find abundances for stellar "\
+                        "parameters Teff = {0}, logg = {1:.2f}, [M/H] = {2:.2f}"\
+                        ", xi = {3:.2f}".format(temperature, logg, metallicity,
+                            xi))
                     return np.array([np.inf]*4)
 
-                # Excitation balance.
-                excitation_balance = stats.linregress(
-                    x=data["excitation_potential"], y=data["abundance"])[0]
+                # Create abundance uncertainties
+                y_uncertainty = np.nanmax(np.abs(np.vstack([
+                    data["u_pos_abundance"], data["u_neg_abundance"]])), axis=0)
+                assert len(y_uncertainty) == len(data)
+
+                # Excitation balance
+                excitation_balance = fit_line(data["excitation_potential"],
+                    data["abundance"], y_uncertainty=y_uncertainty)
 
                 # Line strength balance.
-                line_strength_balance = stats.linregress(
-                    x=np.log(data["equivalent_width"]/data["wavelength"]),
-                    y=data["abundance"])[0]
+                line_strength_balance = fit_line(
+                    np.log(data["equivalent_width"]/data["wavelength"]),
+                    data["abundance"], y_uncertainty=y_uncertainty)
 
                 # Ionisation balance.
                 neutral = (data["species"] % 1) == 0
-                ionisation_state = np.mean(data[neutral]["abundance"]) \
-                    - np.mean(data[~neutral]["abundance"])
+                if not np.all(np.isfinite(y_uncertainty)):
+                    # No uncertainties; all points have equal weight
+                    mean_neutral_abundance = np.mean(data[neutral]["abundance"])
+                    mean_ionised_abundance = np.mean(data[~neutral]["abundance"])
+
+                else:
+                    # Weighted mean
+                    mean_neutral_abundance = (data[neutral]["abundance"] \
+                        * (y_uncertainty[neutral]**-2)).sum()/(y_uncertainty[neutral]**-2).sum()
+                    mean_ionised_abundance = (data[~neutral]["abundance"] \
+                        * (y_uncertainty[~neutral]**-2)).sum()/(y_uncertainty[~neutral]**-2).sum()
+
+                ionisation_state = mean_neutral_abundance - mean_ionised_abundance
 
                 # Metallicity state.
-                abundance_state = np.mean(data[neutral]["abundance"]) \
-                    - metallicity - 7.50
                 # [TODO] Remove hard coding.
-
+                abundance_state = mean_neutral_abundance - metallicity - 7.50
                 results = np.array([excitation_balance, line_strength_balance,
                     ionisation_state, abundance_state])
                 return results
@@ -1327,8 +1483,10 @@ class GenerativeModel(Model):
     
         # Synthesise the model spectra first (in parallel where applicable) and
         # then apply the cheap transformations in serial.
-        model_spectra = si.synthesise(theta["teff"], theta["logg"], theta["[M/H]"],
-            theta["xi"], synthesis_ranges, **synth_kwargs)
+
+        # Note: Pass keyword arguments so that the cacher works.
+        model_spectra = si.synthesise(theta["teff"], theta["logg"], theta["[M/H]"], 
+            theta["xi"], wavelengths=synthesis_ranges, **synth_kwargs)
 
         continuum_spectra = []
         for i in range(len(model_spectra)):
@@ -1666,7 +1824,8 @@ class GenerativeModel(Model):
 
     def _log_probability(self, theta, data, synth_kwargs=None):
         """
-        Return the logarithmic probability of the model parameters ``theta``.
+        Return the logarithmic probability of the GenerativeModel parameters 
+        ``theta``.
 
         :param theta:
             The values of the ``model.parameters``.
@@ -1795,8 +1954,8 @@ class GenerativeModel(Model):
     def optimise(self, data, initial_theta=None, synth_kwargs=None, maxfun=10e3,
         maxiter=10e3, xtol=0.05, ftol=0.01, full_output=False):
         """
-        Optimise the logarithmic probability of the model parameters theta given
-        the data.
+        Optimise the logarithmic probability of the GenerativeModel parameters
+        given some data.
 
         :param data:
             A list of the observed spectra.
@@ -1890,8 +2049,8 @@ class GenerativeModel(Model):
         return op_theta_dict
 
 
-    def infer(self, data, optimised_theta=None, p0=None, walkers=-1, burn=150, 
-        sample=150, threads=1, synth_kwargs=None, **kwargs):
+    def infer(self, data, optimised_theta=None, p0=None, walkers=-1, burn=100, 
+        sample=100, threads=1, synth_kwargs=None, **kwargs):
         """
         Infer the model parameters given the data.
 
@@ -2017,7 +2176,7 @@ class GenerativeModel(Model):
         """
 
         # Get the quantiles.
-        posteriors = dict(zip(self.parameters, map(lambda v: (v[1], v[2]-v[1], v[1]-v[0]),
+        posteriors = dict(zip(self.parameters, map(lambda v: (v[1], v[2]-v[1], v[0]-v[1]),
             zip(*np.percentile(sampler.chain.reshape(-1, len(self.parameters))[-sample*walkers:, :],
                 [16, 50, 84], axis=0)))))
 

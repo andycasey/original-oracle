@@ -142,11 +142,11 @@ def spectrum_comparison(data, model, theta=None, model_spectra=None, figsize=Non
         # Plot the spectra
         if model_spectrum is not None:
             ax.plot(model_spectrum[:, 0], model_spectrum[:, 1], model_color)
+
         if plot_uncertainties:
             ax.errorbar(observed_spectrum.disp, observed_spectrum.flux,
                 yerr=observed_spectrum.variance**0.5, fmt=None, ecolor=observed_color)
         ax.plot(observed_spectrum.disp, observed_spectrum.flux, observed_color)
-        
         
         # Show the mask
         obs_start, obs_end = observed_spectrum.disp[0], observed_spectrum.disp[-1]
@@ -268,12 +268,12 @@ def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None
                 model.parameters,
                 sampler.flatchain[np.random.randint(0, n_samples)]
             ))
-
             try:
                 sampler_flux = [model(dispersion=[s.disp for s in data],
                     **sampled_theta)[:,1]]
             except:
                 continue
+
             else:
                 sampled_fluxes.append(sampler_flux)
     
@@ -285,7 +285,7 @@ def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None
         # Draw the random samples from the chain
         if n > 0:
             for sampled_flux in sampled_fluxes:
-                ax.plot(observed_spectrum.disp, sampled_flux[k], color="#666666")
+                ax.plot(observed_spectrum.disp, sampled_flux[k], color="r", alpha=0.05)
 
         # Draw the ML spectra
         ax.plot(observed_spectrum.disp, max_lnprob_flux, color="r", lw=2)
@@ -294,9 +294,12 @@ def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None
         ax.plot(observed_spectrum.disp, observed_spectrum.flux, color="k")
 
         if plot_uncertainties:
-            ax.errorbar(observed_spectrum.disp, observed_spectrum.flux,
-                yerr=observed_spectrum.variance**0.5, fmt=None, ecolor="k")
-
+            ax.fill_between(observed_spectrum.disp,
+                observed_spectrum.flux - observed_spectrum.variance**0.5,
+                observed_spectrum.flux + observed_spectrum.variance**0.5, 
+                facecolor='#EEEEEE', edgecolor="#AAAAAA", interpolate=True,
+                zorder=-1)
+            
         # By default only show common overlap between the model and spectral data
         if extents is None:
             finite_data = np.isfinite(observed_spectrum.flux)
@@ -445,6 +448,19 @@ def balance(atomic_data_table, title=None):
     ionised = ~neutral
 
     # Plot the excitation potential axes
+    try:
+        uncertainties = np.any(np.isfinite(np.vstack([
+            atomic_data_table["u_pos_abundance"], atomic_data_table["u_neg_abundance"]])))
+    except ValueError:
+        uncertainties = False
+
+    if uncertainties:
+        # Plot uncertainties
+        excitation_ax.errorbar(atomic_data_table["excitation_potential"],
+            atomic_data_table["abundance"],
+            yerr=(np.abs(atomic_data_table["u_neg_abundance"]), atomic_data_table["u_pos_abundance"]),
+            fmt=None, ecolor="k")
+        
     excitation_ax.scatter(atomic_data_table["excitation_potential"][neutral],
         atomic_data_table["abundance"][neutral], facecolor="k", zorder=10)
     excitation_ax.scatter(atomic_data_table["excitation_potential"][ionised],
@@ -471,6 +487,20 @@ def balance(atomic_data_table, title=None):
 
     # Plot the line strength axes
     reduced_equivalent_width = np.log(atomic_data_table["equivalent_width"]/atomic_data_table["wavelength"])
+    if uncertainties:
+        x_pos_uncertainties = np.log(
+            (atomic_data_table["equivalent_width"] + atomic_data_table["u_pos_equivalent_width"]) \
+            /atomic_data_table["wavelength"]) - reduced_equivalent_width
+        x_neg_uncertainties = np.abs(np.log(
+            (atomic_data_table["equivalent_width"] + atomic_data_table["u_neg_equivalent_width"]) \
+            /atomic_data_table["wavelength"]) - reduced_equivalent_width)
+
+        line_strength_ax.errorbar(reduced_equivalent_width,
+            atomic_data_table["abundance"],
+            xerr=(x_neg_uncertainties, x_pos_uncertainties),
+            yerr=(np.abs(atomic_data_table["u_neg_abundance"]), atomic_data_table["u_pos_abundance"]),
+            fmt=None, ecolor="k")
+
     line_strength_ax.scatter(
         reduced_equivalent_width[neutral], atomic_data_table["abundance"][neutral],
         facecolor="k", zorder=10)

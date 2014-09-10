@@ -21,6 +21,9 @@ import models
 import specutils
 from utils import latexify
 
+image_path = lambda s, args: os.path.abspath(os.path.expanduser(s.format(
+    args.output_prefix, args.plot_fmt)))
+
 logger = logging.getLogger("oracle")
 
 def _check_for_existing_files(args):
@@ -58,12 +61,9 @@ def solve_generative(args):
     for parameter, value in initial_guess.iteritems():
         logger.info("\t{0}: {1:.2f}".format(parameter, value))
 
-    image_path = lambda s: os.path.abspath(os.path.expanduser(s.format(
-        args.output_prefix, args.plot_fmt)))
-
     # Create figure showing the initial guess
     if args.plotting:
-        path = image_path("{0}-initial.{1}")
+        path = image_path("{0}-initial.{1}", args)
         fig = plot.spectrum_comparison(data, model, initial_guess)
         fig.savefig(path)
         plt.close(fig)
@@ -75,7 +75,7 @@ def solve_generative(args):
 
     # Plot a projection showing the optimised theta
     if args.plotting:
-        path = image_path("{0}-optimal.{1}")
+        path = image_path("{0}-optimal.{1}", args)
         fig = plot.spectrum_comparison(data, model, optimised_theta)
         fig.savefig(path)
         plt.close(fig)
@@ -92,20 +92,20 @@ def solve_generative(args):
     if args.plotting:
 
         # Plot the mean acceptance fractions
-        path = image_path("{0}-acceptance.{1}")
+        path = image_path("{0}-acceptance.{1}", args)
         fig = plot.acceptance_fractions(additional_info["mean_acceptance_fractions"])
         fig.savefig(path)
         plt.close(fig)
 
         # Plot the values of the chains
-        path = image_path("{0}-chains.{1}")
+        path = image_path("{0}-chains.{1}", args)
         fig = plot.chains(sampler.chain)
         fig.savefig(path)
         plt.close(fig)
 
         # Make a corner plot [of just the astrophysical parameters]
         # [TODO]
-        path = image_path("{0}-corner.{1}")
+        path = image_path("{0}-corner.{1}", args)
         index = additional_info["burn"] * additional_info["walkers"]
         fig = triangle.corner(sampler.chain.reshape(-1, len(model.parameters))[index:, :],
             labels=latexify(model.parameters))
@@ -115,6 +115,69 @@ def solve_generative(args):
 
 
     raise a
+
+
+def infer_classical(args):
+    """ Perform inference on the classical model """
+
+    t_init = time()
+
+    # Create the model and load the data
+    data = map(specutils.Spectrum.load, args.spectra_filenames)
+    data.sort(key=lambda spectrum: spectrum.disp.mean())
+
+    model = models.StellarSpectrum(args.config_filename, data)
+
+    # Optimise the individual channel parameters
+    optimised_model_parameters = model.optimise(data)
+
+    # Plot the spectrum
+    if args.plotting:
+        path = image_path("{0}-optimised.{1}", args)
+
+        model_spectra = [c(s.disp, **theta) for c, s, theta in \
+            zip(model.channels, data, optimised_model_parameters)]
+        fig = plot.spectrum_comparison(data, model, model_spectra=model_spectra)
+        fig.savefig(path)
+        logger.info("Saved figure to {0}".format(path))
+        plt.close(fig)
+
+    # Infer the channel parameters
+    inferred_model_parameters = model.infer(data, optimised_model_parameters)
+    
+    # Plot the inferred spectrum with uncertainties, etc.
+    if args.plotting:
+        for i, (channel, result) in enumerate(zip(model.channels, inferred_model_parameters)):
+            path = image_path("{0}-inferred-model-" + str(i) + ".{1}", args)
+            fig = plot.projection(result[1], channel, [data[i]], n=100,
+                figsize=(100, 6), plot_uncertainties=True)
+            fig.savefig(path)
+            logger.info("Saved figure to {0}".format(path))
+
+
+    # Integrate the line profiles (with uncertainties) and optimise stellar parameters
+    atomic_data = model.integrate_profiles([each[0] for each in inferred_model_parameters])
+
+    op_x, op_atomic_data = model.optimise_stellar_parameters(atomic_data,
+        full_output=True, ftol=model.config["classical"].get("tolerance", 4e-3),
+        maxiter=model.config["classical"].get("maxiter", 3))
+
+
+    if args.plotting:
+        path = image_path("{0}-inferred-balance.{1}", args)
+
+        title = "$T_{\\rm eff} = "
+        fig = plot.balance(op_atomic_data)
+        fig.savefig(path)
+        logger.info("Saved figure to {0}".format(path))
+        plt.close(fig)
+
+
+    #import triangle
+    #fig = plot.projection(moobar[1], model.channels[0], [data[0]], n=1000,
+    #    figsize=(25,4), plot_uncertainties=True)
+    #plt.show()
+    #raise a
 
 
 def solve_classical(args):
@@ -132,12 +195,9 @@ def solve_classical(args):
     # Optimise the individual channel parameters
     optimised_model_parameters = model.optimise(data)
 
-    image_path = lambda s: os.path.abspath(os.path.expanduser(s.format(
-        args.output_prefix, args.plot_fmt)))
-
     # Plot the spectrum.
     if args.plotting:
-        path = image_path("{0}-optimised.{1}")
+        path = image_path("{0}-optimised.{1}", args)
 
         model_spectra = [c(s.disp, **theta) for c, s, theta in \
             zip(model.channels, data, optimised_model_parameters)]
@@ -146,22 +206,7 @@ def solve_classical(args):
         logger.info("Saved figure to {0}".format(path))
         plt.close(fig)
 
-    # Infer the channel parameters
-    #posterior_model_parameters = model.infer(data, optimised_model_parameters)
-
-    # Plot the inferred spectrum with uncertainties, etc.
-    if args.plotting:
-        path = image_path("{0}-inferred.{1}")
-
-
-
-    #import triangle
-    #fig = plot.projection(moobar[1], model.channels[0], [data[0]], n=1000,
-    #    figsize=(25,4), plot_uncertainties=True)
-    #plt.show()
-    #raise a
-
-
+    # Integrate the line profiles and optimise stellar parameters
     atomic_data = model.integrate_profiles(optimised_model_parameters)
     op_x, op_atomic_data = model.optimise_stellar_parameters(atomic_data,
         full_output=True, ftol=model.config["classical"].get("tolerance", 4e-3),
@@ -174,7 +219,7 @@ def solve_classical(args):
         return None
 
     if args.plotting:
-        path = image_path("{0}-balance.{1}")
+        path = image_path("{0}-balance.{1}", args)
 
         title = "$T_{\\rm eff} = "
         fig = plot.balance(op_atomic_data)
@@ -206,6 +251,27 @@ def solve(args):
 
     else:
         raise NotImplementedError("how did you get here?")
+
+
+
+def infer(args):
+
+    # Before doing heaps of analysis, look to see if we intend to create some
+    # files and if those files already exist -- and we have been told not to 
+    # clobber them -- then we should raise an exception now before doing any
+    # real work
+    _check_for_existing_files(args)
+
+    if args.analysis_type == "generative":
+        infer_generative(args)
+
+    elif args.analysis_type == "classical":
+        infer_classical(args)
+
+    else:
+        raise NotImplementedError("how did you get here?")
+
+
 
 
 
@@ -246,8 +312,7 @@ def main():
 
     # Create parser for the solve command
     solve_parser = subparsers.add_parser("solve", parents=[parent_parser],
-        help="Compute posterior probability distributions for the model "\
-        "parameters, given the data.")
+        help="Numerically optimise the model parameters, given the data.")
 
     solve_parser.add_argument("analysis_type", type=str,
         choices=("generative", "classical"),
@@ -271,10 +336,44 @@ def main():
         default="oracle", help="The filename prefix to use for all output files.")
 
     solve_parser.add_argument("--plot-format", "-pf", dest="plot_fmt",
-        action="store", type=str, default="png", help="Format for output plots "\
+        action="store", type=str, default="pdf", help="Format for output plots "\
         "(default: %(default)s). Available formats are (case insensitive):"
         " PDF, JPG, PNG, EPS")
     solve_parser.set_defaults(func=solve)
+
+
+    # Create parser for the infer command
+    infer_parser = subparsers.add_parser("infer", parents=[parent_parser],
+        help="Infer posterior probability distributions for the model "\
+        "parameters, given the data.")
+
+    infer_parser.add_argument("analysis_type", type=str,
+        choices=("generative", "classical"),
+        help="The kind of analysis to perform. Available options are: classical"\
+        " or generative (default: %(default)s).")
+
+    infer_parser.add_argument("config_filename", type=str,
+        help="The configuration filename in YAML- or JSON-style formatting.")
+
+    infer_parser.add_argument("spectra_filenames", nargs="+",
+        help="Filenames of (observed) spectroscopic data.")
+
+    infer_parser.add_argument("-s", "--num_scatter_points", dest="num_scatter_points",
+        action="store", default=1, help="Number of scatter points to sample before"\
+        " starting numerical optimisation (default: %(default)s).", type=int)
+
+    infer_parser.add_argument("--no-plots", dest="plotting", action="store_false",
+        default=True, help="Disable plotting.")
+
+    infer_parser.add_argument("--output-prefix", "-o", dest="output_prefix",
+        default="oracle", help="The filename prefix to use for all output files.")
+
+    infer_parser.add_argument("--plot-format", "-pf", dest="plot_fmt",
+        action="store", type=str, default="pdf", help="Format for output plots "\
+        "(default: %(default)s). Available formats are (case insensitive):"
+        " PDF, JPG, PNG, EPS")
+    infer_parser.set_defaults(func=infer)
+
 
     # Parse arguments and specify logging level
     args = parser.parse_args()
