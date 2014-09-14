@@ -1144,16 +1144,11 @@ class AtmosphereInterpolator:
         
         # Protect griddata from dimensionality complexes
         try:
-            if subset_points.shape[1] == 1:
-                interpolated_deck = scipy.interpolate.griddata(subset_points.flatten(), subset_values, interpolated_point.flatten()).reshape(thermal_structure_shape)
-            
-            else:
-                interpolated_deck = scipy.interpolate.griddata(subset_points, subset_values, interpolated_point.reshape(1, len(interpolated_point))).reshape(thermal_structure_shape)
+            interpolated_deck = scipy.interpolate.griddata(
+                subset_points, subset_values, 
+                interpolated_point.reshape(1, len(interpolated_point))).reshape(thermal_structure_shape)
         except:
-            logger.debug("Interpolator fell over:")
-            logger.debug(subset_points.shape)
-            logger.debug(interpolated_point.shape)
-            raise
+            raise ValueError("parameter outside of boundaries")
             
         if np.all(np.isnan(interpolated_deck)):
             raise ValueError("QHull interpolation fell over")
