@@ -14,7 +14,7 @@ from threading import RLock
 import numpy as np
 from scipy.special import wofz
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("oracle")
 
 _CacheInfo = namedtuple("CacheInfo", ["hits", "misses", "maxsize", "currsize"])
 
@@ -128,6 +128,7 @@ def lru_cache(maxsize=128, typed=False):
                         link[PREV] = last
                         link[NEXT] = root
                         stats[HITS] += 1
+                        logger.debug("Using cache")
                         return result
                 result = user_function(*args, **kwds)
                 with lock:
@@ -180,7 +181,7 @@ def lru_cache(maxsize=128, typed=False):
     return decorating_function
 
 
-def rounder(*decimals):
+def rounder(*decimals, **decimal_kwargs):
     def decorator(function):
         def wrapper(*args, **kwargs):
             
@@ -195,7 +196,6 @@ def rounder(*decimals):
             missing_args = len(args) - len(rounded_args)
             if missing_args > 0:
                 rounded_args.extend(args[-missing_args:])
-
             return function(*rounded_args, **kwargs)
         return wrapper
     return decorator
