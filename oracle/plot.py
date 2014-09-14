@@ -55,8 +55,7 @@ def acceptance_fractions(mean_acceptance_fractions, burn=None, **kwargs):
 
 
 def spectrum_comparison(data, model, theta=None, model_spectra=None, figsize=None,
-    plot_uncertainties=False, observed_color=u"k", model_color=u"b", mask_color=u"r",
-    mask_alpha=0.5):
+    observed_color=u"k", model_color=u"#4682b4", mask_color=u"r", mask_alpha=0.1):
     """
     Produce a comparison plot showing the observed and model spectra.
 
@@ -92,12 +91,6 @@ def spectrum_comparison(data, model, theta=None, model_spectra=None, figsize=Non
 
     :type figsize:
         tuple
-
-    :param plot_uncertainties: [optional]
-        Show the uncertainties in the observed data.
-
-    :type plot_uncertainties:
-        bool
 
     [TODO]: other docs
 
@@ -143,9 +136,10 @@ def spectrum_comparison(data, model, theta=None, model_spectra=None, figsize=Non
         if model_spectrum is not None:
             ax.plot(model_spectrum[:, 0], model_spectrum[:, 1], model_color)
 
-        if plot_uncertainties:
-            ax.errorbar(observed_spectrum.disp, observed_spectrum.flux,
-                yerr=observed_spectrum.variance**0.5, fmt=None, ecolor=observed_color)
+        ax.fill_between(observed_spectrum.disp, 
+            observed_spectrum.flux - observed_spectrum.variance**0.5,
+            observed_spectrum.flux + observed_spectrum.variance**0.5,
+            facecolor="#eeeeee", edgecolor="#666666", zorder=-1)
         ax.plot(observed_spectrum.disp, observed_spectrum.flux, observed_color)
         
         # Show the mask
@@ -165,7 +159,7 @@ def spectrum_comparison(data, model, theta=None, model_spectra=None, figsize=Non
 
 
 def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None,
-    plot_uncertainties=False):
+    mask_color="r", mask_alpha=0.1):
     """
     Project the maximum likelihood values and sampled posterior points as spectra.
 
@@ -206,12 +200,6 @@ def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None
     :type figsize:
         tuple or None
 
-    :param plot_uncertainties: [optional]
-        Plot uncertainties in the data.
-
-    :type plot_uncertainties:
-        bool
-
     :raises ValueError:
         If a ``fig`` is provided with the incorrect number of axes.
 
@@ -235,7 +223,7 @@ def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None
     lbdim = 0.5 * factor
     trdim = 0.2 * factor
     whspace = 0.10
-    width = 8.
+    width = max([len(each.disp) for each in data])/150.
     height = factor*K + factor * (K - 1.) * whspace
     dimy = lbdim + height + trdim
     dimx = lbdim + width + trdim
@@ -285,21 +273,30 @@ def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None
         # Draw the random samples from the chain
         if n > 0:
             for sampled_flux in sampled_fluxes:
-                ax.plot(observed_spectrum.disp, sampled_flux[k], color="r", alpha=0.05)
+                ax.plot(observed_spectrum.disp, sampled_flux[k], color=u"#4682b4", alpha=0.1)
 
         # Draw the ML spectra
-        ax.plot(observed_spectrum.disp, max_lnprob_flux, color="r", lw=2)
+        ax.plot(observed_spectrum.disp, max_lnprob_flux, color=u"#4682b4", lw=2)
 
         # Plot the data
         ax.plot(observed_spectrum.disp, observed_spectrum.flux, color="k")
 
-        if plot_uncertainties:
-            ax.fill_between(observed_spectrum.disp,
-                observed_spectrum.flux - observed_spectrum.variance**0.5,
-                observed_spectrum.flux + observed_spectrum.variance**0.5, 
-                facecolor='#EEEEEE', edgecolor="#AAAAAA", interpolate=True,
-                zorder=-1)
-            
+        ax.fill_between(observed_spectrum.disp,
+            observed_spectrum.flux - observed_spectrum.variance**0.5,
+            observed_spectrum.flux + observed_spectrum.variance**0.5, 
+            facecolor='#eeeeee', edgecolor="#666666", zorder=-1)
+        
+        # Show the mask
+        mask = np.array(model.config.get("mask", []))
+        obs_start, obs_end = observed_spectrum.disp[0], observed_spectrum.disp[-1]
+        for start, end in mask:
+            if obs_end >= start and start >= obs_start \
+            or obs_end >= end and end >= obs_start:
+                # Show the mask in this axes.
+                ax.axvspan(start, end, facecolor=mask_color, alpha=mask_alpha,
+                    edgecolor='none')
+
+
         # By default only show common overlap between the model and spectral data
         if extents is None:
             finite_data = np.isfinite(observed_spectrum.flux)
@@ -460,7 +457,7 @@ def balance(atomic_data_table, title=None):
             atomic_data_table["abundance"],
             yerr=(np.abs(atomic_data_table["u_neg_abundance"]), atomic_data_table["u_pos_abundance"]),
             fmt=None, ecolor="k")
-        
+
     excitation_ax.scatter(atomic_data_table["excitation_potential"][neutral],
         atomic_data_table["abundance"][neutral], facecolor="k", zorder=10)
     excitation_ax.scatter(atomic_data_table["excitation_potential"][ionised],
