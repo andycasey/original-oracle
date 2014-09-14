@@ -24,7 +24,6 @@ from atmospheres import interpolator as atmospheres
 from utils import atomic_number
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 __all__ = ["instance"]
 
@@ -193,15 +192,14 @@ class instance(object):
             # [TODO]: Ignoring van Der Waal damping coefficients for the moment << implement if they exist!
             output += line.format(*[measurement[col] for col in ["wavelength", "species",
                 "excitation_potential", "loggf", "equivalent_width"]])
-
-            # [TODO]: Allow asymmetric uncertainties
             uncertainty_keys = ("u_pos_equivalent_width", "u_neg_equivalent_width")
-            for uncertainty_key in uncertainty_keys:
-                line_data = [measurement[col] for col in ["wavelength", "species",
-                    "excitation_potential", "loggf", "equivalent_width"]]
-                # Add the associated uncertainty to the equivalent width
-                line_data[-1] += measurement[uncertainty_key]
-                output += line.format(*line_data)
+            if np.all(np.isfinite([measurement[k] for k in uncertainty_keys])):
+                for uncertainty_key in uncertainty_keys:
+                    line_data = [measurement[col] for col in ["wavelength", "species",
+                        "excitation_potential", "loggf", "equivalent_width"]]
+                    # Add the associated uncertainty to the equivalent width
+                    line_data[-1] += measurement[uncertainty_key]
+                    output += line.format(*line_data)
     
         return output
         
@@ -228,7 +226,7 @@ class instance(object):
         return dedent(output).lstrip()
 
 
-    def _parse_abfind_summary_output(self, filename):
+    def _parse_abfind_summary_output(self, filename, min_uncertainty=0.01):
         """ Reads the summary output filename after MOOG's `abfind` has been
         called and returns a numpy record array """
 
@@ -283,13 +281,13 @@ class instance(object):
                             # u_pos_equivalent_width
                             data[index][-4] = line_data[-2] - data[index][4]
                             # u_pos_abundance
-                            data[index][-2] = line_data[-1] - data[index][5]
+                            data[index][-2] = np.clip(line_data[-1] - data[index][5], min_uncertainty, None)
 
                         else:
                             # u_neg_equivalent_width
                             data[index][-3] = line_data[-2] - data[index][4]
                             # u_neg_abundance
-                            data[index][-1] = line_data[-1] - data[index][5]
+                            data[index][-1] = np.clip(line_data[-1] - data[index][5], None, -min_uncertainty)
                         continue
 
                 # Append nans as uncertainties
