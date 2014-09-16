@@ -1,0 +1,8 @@
+ fine structure components for Halpha
+ lambda=  6562.834  f_ij=  0.05339844
+ lambda=  6562.861  f_ij=  0.10679688
+ lambda=  6562.845  f_ij=  0.05339844
+ lambda=  6562.869  f_ij=  0.10679688
+ lambda=  6562.760  f_ij=  0.05339844
+ lambda=  6562.783  f_ij=  0.10679688
+ lambda=  6562.791  f_ij=  0.16019531

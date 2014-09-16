@@ -1,0 +1,12 @@
+
+      FUNCTION EPOL(X,IBUF,A,B,C)
+      INTEGER*2 IBUF(1)
+      REAL A(1),B(1),C(1)
+C
+C-----CUBIC SPLINE INTERPOLATION FOR EQUIDISTANT INTERVALS
+      I=X
+      D=X-I
+      EPOL=IBUF(I)+D*(A(I)+D*(B(I)+D*C(I)))
+C
+      RETURN
+      END

@@ -1,0 +1,59 @@
+
+C     from Kurucz atlas9
+      FUNCTION MAP1(XOLD,FOLD,NOLD,XNEW,FNEW,NNEW)
+      IMPLICIT REAL*8 (A-H,O-Z)
+      DIMENSION XOLD(1),FOLD(1),XNEW(1),FNEW(1)
+      L=2
+      LL=0
+      DO 50 K=1,NNEW
+   10 IF(XNEW(K).LT.XOLD(L))GO TO 20
+      L=L+1
+      IF(L.GT.NOLD)GO TO 30
+      GO TO 10
+   20 IF(L.EQ.LL)GO TO 50
+      IF(L.EQ.2)GO TO 30
+      IF(L.EQ.3)GO TO 30
+      L1=L-1
+      IF(L.GT.LL+1.OR.L.EQ.3)GO TO 21
+      IF(L.GT.LL+1.OR.L.EQ.4)GO TO 21
+      CBAC=CFOR
+      BBAC=BFOR
+      ABAC=AFOR
+      IF(L.EQ.NOLD)GO TO 22
+      GO TO 25
+   21 L2=L-2
+      D=(FOLD(L1)-FOLD(L2))/(XOLD(L1)-XOLD(L2))
+      CBAC=FOLD(L)/((XOLD(L)-XOLD(L1))*(XOLD(L)-XOLD(L2)))+
+     1(FOLD(L2)/(XOLD(L)-XOLD(L2))-FOLD(L1)/(XOLD(L)-XOLD(L1)))/
+     2(XOLD(L1)-XOLD(L2))
+      BBAC=D-(XOLD(L1)+XOLD(L2))*CBAC
+      ABAC=FOLD(L2)-XOLD(L2)*D+XOLD(L1)*XOLD(L2)*CBAC
+      IF(L.LT.NOLD)GO TO 25
+   22 C=CBAC
+      B=BBAC
+      A=ABAC
+      LL=L
+      GO TO 50
+   25 D=(FOLD(L)-FOLD(L1))/(XOLD(L)-XOLD(L1))
+      CFOR=FOLD(L+1)/((XOLD(L+1)-XOLD(L))*(XOLD(L+1)-XOLD(L1)))+
+     1(FOLD(L1)/(XOLD(L+1)-XOLD(L1))-FOLD(L)/(XOLD(L+1)-XOLD(L)))/
+     2(XOLD(L)-XOLD(L1))
+      BFOR=D-(XOLD(L)+XOLD(L1))*CFOR
+      AFOR=FOLD(L1)-XOLD(L1)*D+XOLD(L)*XOLD(L1)*CFOR
+      WT=0.
+      IF(ABS(CFOR).NE.0.)WT=ABS(CFOR)/(ABS(CFOR)+ABS(CBAC))
+      A=AFOR+WT*(ABAC-AFOR)
+      B=BFOR+WT*(BBAC-BFOR)
+      C=CFOR+WT*(CBAC-CFOR)
+      LL=L
+      GO TO 50
+   30 IF(L.EQ.LL)GO TO 50
+      L=MIN0(NOLD,L)
+      C=0.
+      B=(FOLD(L)-FOLD(L-1))/(XOLD(L)-XOLD(L-1))
+      A=FOLD(L)-XOLD(L)*B
+      LL=L
+   50 FNEW(K)=A+(B+C*XNEW(K))*XNEW(K)
+      MAP1=LL-1
+      RETURN
+      END

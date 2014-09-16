@@ -1,0 +1,5 @@
+recursive-include oracle/si/data *
+recursive-include oracle/si/linedata * 
+recursive-include oracle/si/atmospheres *
+recursive-include oracle/si/code *
+prune *.o
