@@ -2,7 +2,7 @@
 .gitignore
 
 # Ignore build stuff
-si/si_lineform
+si_lineform
 *.o
 build/
 dist/
