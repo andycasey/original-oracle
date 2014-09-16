@@ -86,7 +86,8 @@ def solve_generative(args):
     # [TODO]
 
     # Inference!
-    posteriors, sampler, additional_info = model.infer(data, optimised_theta)
+    posteriors, sampler, additional_info = model.infer(data, optimised_theta,
+        walkers=100, burn=150, sample=50)
     print(posteriors)
     # Make plots, where necessary.
     if args.plotting:
@@ -148,18 +149,39 @@ def infer_classical(args):
     # Plot the inferred spectrum with uncertainties, etc.
     if args.plotting:
         for i, (channel, result) in enumerate(zip(model.channels, inferred_model_parameters)):
+            # Plot the spectrum projection.
             path = image_path("{0}-inferred-model-" + str(i) + ".{1}", args)
-            fig = plot.projection(result[1], channel, [data[i]], n=100,
-                figsize=(100, 6), plot_uncertainties=True)
+            fig = plot.projection(result[1], channel, [data[i]], n=100)
             fig.savefig(path)
-            logger.info("Saved figure to {0}".format(path))
+            plt.close(fig)
+            logger.info("Saved projection figure to {0}".format(path))
+
+            # Plot the chains.
+            path = image_path("{0}-chains-" + str(i) + ".{1}", args)
+            fig = plot.chains(result[2]["chain"], labels=channel.parameters)
+            fig.savefig(path)
+            plt.close(fig)
+            logger.info("Saved chain figure to {0}".format(path))
+
+            # Plot the autocorrelation
+            path = image_path("{0}-acor-" + str(i) + ".{1}", args)
+            fig = plot.autocorrelation(result[2]["chain"], burn_in=1000, labels=channel.parameters)
+            fig.savefig(path)
+            plt.close(fig)
+            logger.info("Saved autocorrelation figure to {0}".format(path))
+
+
+    raise a
 
 
     # Integrate the line profiles (with uncertainties) and optimise stellar parameters
     atomic_data = model.integrate_profiles([each[0] for each in inferred_model_parameters])
 
-    op_x, op_atomic_data = model.optimise_stellar_parameters(atomic_data,
-        full_output=True, ftol=model.config["classical"].get("tolerance", 4e-3),
+    raise a
+
+    op_x, op_atomic_data, op_converged = model.optimise_stellar_parameters(
+        atomic_data, full_output=True, 
+        ftol=model.config["classical"].get("tolerance", 4e-3),
         maxiter=model.config["classical"].get("maxiter", 3))
 
 
@@ -206,10 +228,12 @@ def solve_classical(args):
         logger.info("Saved figure to {0}".format(path))
         plt.close(fig)
 
+
     # Integrate the line profiles and optimise stellar parameters
     atomic_data = model.integrate_profiles(optimised_model_parameters)
-    op_x, op_atomic_data = model.optimise_stellar_parameters(atomic_data,
-        full_output=True, ftol=model.config["classical"].get("tolerance", 4e-3),
+    op_x, op_atomic_data, op_converged = model.optimise_stellar_parameters(
+        atomic_data, full_output=True, 
+        ftol=model.config["classical"].get("tolerance", 4e-3),
         maxiter=model.config["classical"].get("maxiter", 3))
 
     if not np.isfinite(op_x).all():
@@ -221,9 +245,9 @@ def solve_classical(args):
     if args.plotting:
         path = image_path("{0}-balance.{1}", args)
 
-        title = "$T_{\\rm eff} = "
         fig = plot.balance(op_atomic_data)
         fig.savefig(path)
+        fig.axes[0].set_title(["Not converged", "Converged"][op_converged])
         logger.info("Saved figure to {0}".format(path))
         plt.close(fig)
 

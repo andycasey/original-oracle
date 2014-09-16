@@ -1,4 +1,0 @@
-lineform.so \
-		:st = .text 0x000003ffbffc0000, 0x0000000000040000:\
-		:st = .data 0x000003fffb3c0000, 0x0000000004c40000:\
-

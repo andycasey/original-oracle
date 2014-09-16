@@ -18,7 +18,7 @@ from string import ascii_letters
 from subprocess import PIPE, Popen
 from textwrap import dedent
 
-import utils
+from . import utils
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("si")
@@ -32,7 +32,7 @@ class instance(object):
     _executable = "si_lineform"
     _acceptable_return_codes = (0, )
 
-    def __init__(self, twd_base_dir="/tmp", prefix="si", chars=10, debug=False):
+    def __init__(self, twd_base_dir="/tmp", prefix="si", chars=10, debug=True):
         """
         A context manager for interfacing with SI.
 
@@ -80,8 +80,8 @@ class instance(object):
         logging.debug("Temporary working directory: {0}".format(self.twd))
 
         # Link the line list.
-        siu_line_list = os.path.abspath(os.path.join(os.path.dirname(os.path.expanduser(__file__)), 
-            "../si/linedata/master_line.dat")) 
+        siu_line_list = os.path.abspath(os.path.join(os.path.dirname(
+            os.path.expanduser(__file__)),  "linedata/master_line.dat")) 
         os.symlink(siu_line_list, os.path.join(self.twd, "linedata.dat"))
 
         return self
@@ -126,7 +126,7 @@ class instance(object):
         # We will make this relative to __file__ until we can remove
         # all instances of SIU_MAIN in the fortran code itself.
         default_env["SIU_MAIN"] = os.path.abspath(
-            os.path.join(os.path.dirname(os.path.expanduser(__file__)), "../si"))
+            os.path.join(os.path.dirname(os.path.expanduser(__file__))))
         
         if env is not None:
             default_env.update(env)
@@ -391,10 +391,10 @@ class instance(object):
         except OSError:
             pass
 
-        # Write the new input file/
+        # Write the new input file
         with open(os.path.join(self.twd, "fort.10"), "w+") as fp:
 
-            # SI requires the minimum step width to be in mA, and the maximum
+            # SIU requires the minimum step width to be in mA, and the maximum
             # step width to be in Angstroms. Because that makes perfect sense.
             fp.write(dedent("""
             {teff:.0f}
@@ -612,8 +612,6 @@ def synthesise_single(teff, logg, metallicity, xi, wavelength_start,
 
     return data
 
-@utils.rounder(-1, 2, 2, 2, 1)
-@utils.lru_cache(maxsize=1000, typed=False)
 def synthesise(teff, logg, metallicity, xi, wavelengths,
     wavelength_steps=(0.10, 0.005, 1.5), abundances=None, full_output=False,
     threads=1, chunk=True):

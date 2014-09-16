@@ -3,4 +3,4 @@
 from __future__ import absolute_import
 
 import io
-from .interface import instance
+from .interface import instance, equivalent_width, synthesise

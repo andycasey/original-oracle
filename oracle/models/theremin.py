@@ -13,7 +13,7 @@ import numpy as np
 from scipy import optimize as op
 
 from oracle import si, specutils, utils
-from .model import Model, _log_prior_eval_environment
+from oracle.models import Model
 
 logger = logging.getLogger("oracle")
 
@@ -35,6 +35,7 @@ class ThereminModel(Model):
         :type configuration:
             str
         """
+
         super(ThereminModel, self).__init__(configuration)
         return None
 
@@ -100,7 +101,7 @@ class ThereminModel(Model):
         # At each stellar parameter test we need to re-fit all the lines
         # So we need another model class.
 
-        model_spectra = ThereminSpectrumModel(self.configuration, data)
+        model_spectra = SpectrumModel(self.configuration, data)
 
         initial_theta = model_spectra.initial_guess()
 
@@ -118,16 +119,33 @@ class ThereminModel(Model):
 
 
 
-class ThereminSpectrumModel(Model):
+class SpectrumModel(Model):
+
+    synth_surrounding = 2.
 
     def __init__(self, configuration, data):
-        super(ThereminSpectrumModel, self).__init__(configuration)
+        """
+        A class to represent stellar spectra. This class performs on-the-fly 
+        synthesis of specific absorption lines in order to perform an excitation
+        and ionisation balance, while accounting for blends.
+
+        :param configuration:
+            The path to the configuration file that contains settings for the
+            class, or a string containing the configuration. Only YAML-style
+            formats are accepted.
+
+        :type configuration:
+            str
+        """
+
+        super(SpectrumModel, self).__init__(configuration)
 
         if not isinstance(data, (tuple, list)):
             raise TypeError("data must be a list-type of Spectrum1D objects")
 
         self.data = data
         self._optimised_theta = None
+        _ = self.parameters
         return None
 
 
@@ -143,22 +161,28 @@ class ThereminSpectrumModel(Model):
             None
 
         parameters = []
-        num_channels = len(data)
-        for transition in self.config["ThereminModel"]["atomic_lines"]:
+        transition_mapping = {}
+        num_channels = len(self.data)
+        for i, transition in enumerate(self.config["ThereminModel"]["atomic_lines"]):
             wavelength, species = transition[:2]
 
             # No point adding the transition if it is outside of our observed
             # spectral range.
-            for i, spectrum in enumerate(data):
+            in_observed_range = False
+            for j, spectrum in enumerate(self.data):
                 if (spectrum.disp[-1] >= wavelength >= spectrum.disp[0]):
-                    break
-            else:
+                    in_observed_range = True
+                    if j not in transition_mapping:
+                        transition_mapping[j] = []
+                    transition_mapping[j].append(i)
+
+            if not in_observed_range:
                 # This transition is not in any of the observed spectral ranges
                 # so let's ignore it.
                 continue
 
-            parameters.append("log({0}_{1:.0f})".format(utils.element(species),
-                wavelength))
+            parameters.append("log({0}{1:.0f}@{2:.1f})".format(
+                utils.element(species), ((species % 1)*10)+1, wavelength))
 
         # Dumb check.
         assert len(parameters) == len(set(parameters)), "At least one atomic "\
@@ -167,7 +191,7 @@ class ThereminSpectrumModel(Model):
         # Any redshift parameters?
         if self.config["model"]["redshift"]:
             # [TODO] Allow individual channel redshifts
-            parameters.extend(["z_{0}".format(i) for i in range(len(data))])
+            parameters.extend(["z_{0}".format(i) for i in range(len(self.data))])
 
         # Any continuum parameters?
         if self.config["model"]["continuum"]:
@@ -183,11 +207,12 @@ class ThereminSpectrumModel(Model):
                     for j in range(num_channels_with_continuum)])
 
         # Any doppler broadening?
-        if config["model"]["doppler_broadening"]:
+        if self.config["model"]["doppler_broadening"]:
             # [TODO] You idiot.
             parameters.extend(["doppler_sigma_{0}".format(i) \
                 for i in range(num_channels)])
 
+        self._transition_mapping = transition_mapping
         self._parameters = parameters
         return parameters
 
@@ -198,14 +223,36 @@ class ThereminSpectrumModel(Model):
         Produce some synthetic spectra to compare against the data.
         """
 
-        expected_fluxes = [np.ones((len(spectrum.disp))) for spectrum in data]
+        expected_fluxes = [np.ones((len(spectrum.disp))) for spectrum in self.data]
 
         # Synthesise the required spectra around each line.
         for i, (observed, expected_flux) in enumerate(zip(self.data, expected_fluxes)):
 
             # For each line:
             # Synthesise some spectrum given the abundance.
+            for index in self._transition_mapping[i]:
+                wavelength, species = self.config["ThereminModel"]["atomic_lines"][index][:2]
 
+                wavelength_region = (
+                    wavelength - self.synth_surrounding,
+                    wavelength + self.synth_surrounding
+                )
+                abundance = theta["log({0}{1:.0f}@{2:.1f})".format(
+                    utils.element(species), ((species % 1)*10)+1, wavelength)]
+
+                synthesised_spectrum = si.synthesise(effective_temperature,
+                    surface_gravity, metallicity, xi, wavelength_region,
+                    abundances={utils.element(species): abundance})
+
+                # Interpolate the synthesised spectrum onto the observed pixels
+                wl_indices = observed.disp.searchsorted(wavelength_region)
+                resampled_flux = np.interp(
+                    observed.disp[wl_indices[0]:wl_indices[1]],
+                    synthesised_spectrum[:, 0], synthesised_spectrum[:, 1],
+                    left=1., right=1.)
+
+                # The spectrum enters multiplicatively.
+                expected_flux[wl_indices[0]:wl_indices[1]] *= resampled_flux
 
             # Apply continuum, redshift, and doppler broadening,
             # The continuum enters multiplicatively with the expected fluxes.
@@ -241,18 +288,40 @@ class ThereminSpectrumModel(Model):
         return expected_fluxes
 
 
+    def initial_guess(self, effective_temperature, surface_gravity, metallicity,
+        xi):
+        """
+        Provide an initial guess of all the SpectrumModel model parameters
+        given some stellar parameters.
+        """
+
+        # Synthesise spectrum.
+
+        # Cross-correlate with data to obtain estimate of radial velocity
+
+        # Estimate continuum parameters
+
+        # Estimate doppler broadening parameters
+
+
+        return None
+
+
     def optimise(self, effective_temperature, surface_gravity, metallicity, xi,
         initial_guess=None, use_previously_optimised=True):
         """
         Given some fixed stellar parameters, optimise the model parameters.
         """
 
-        if initial_guess is None and use_previously_optimised \
-        and self._optimised_theta is not None:
-            logger.info("Using previously optimised theta as initial guess:"\
-                "{0}".format(self._optimised_theta))
-            initial_guess = self._optimised_theta
+        if initial_guess is None:
+            if use_previously_optimised and self._optimised_theta is not None:
+                logger.info("Using previously optimised theta as initial guess:"\
+                    "{0}".format(self._optimised_theta))
+                initial_guess = self._optimised_theta
 
+            else:
+                initial_guess = self.initial_guess(effective_temperature,
+                    surface_gravity, metallicity, xi)
 
         # Save the optimised
         return None
