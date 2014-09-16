@@ -13,8 +13,8 @@ import numpy as np
 from scipy import stats
 
 import acor
-import line
 import specutils
+from models import line
 
 logger = logging.getLogger(__name__)
 

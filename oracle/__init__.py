@@ -1,5 +1,7 @@
 # coding: utf-8
 
+from __future__ import absolute_import
+
 """ oracle, the suppository of all wisdom """ 
 
 __author__ = "Andy Casey <arc@ast.cam.ac.uk>"

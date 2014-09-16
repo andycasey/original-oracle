@@ -11,9 +11,6 @@ import scipy.optimize as op
 from scipy.special import wofz
 from time import time
 
-import utils
-import specutils
-
 logger = logging.getLogger("oracle")
 
 
@@ -123,7 +120,7 @@ def pseudo_voigt(mu, sigma, fraction, x):
 
 class AbsorptionProfile(object):
 
-    def __init__(self, wavelength, profile="voigt", mask=None):
+    def __init__(self, wavelength, fwhm=None):
         """
         Model an absorption profile in a spectrum.
 
@@ -132,19 +129,6 @@ class AbsorptionProfile(object):
 
         :type wavelength:
             float
-
-        :param profile: [optional]
-            The type of profile to use. Available profiles are Gaussian or Voigt.
-
-        :type profile:
-            str
-
-        :param mask: [optional]
-            A mask to use for the observed channel. This should be of the same
-            length as the observed data points.
-
-        :type mask:
-            :class:`numpy.array`
 
         :param outliers: [optional]
             Model outlier pixels with a Gaussian mixture model.
@@ -178,19 +162,15 @@ class AbsorptionProfile(object):
             ``wavelength_tolerance``, ``wavelength_contribution`` values are negative.
         """
 
-        self.profile = profile.lower()
-        if self.profile not in ("gaussian", "voigt"):
-            raise ValueError("profile must be either Gaussian or Voigt")
-
         #if 0 > wavelength_tolerance:
         #    raise ValueError("wavelength tolerance must be a positive quantity")
 
         #if 0 > wavelength_contribution:
         #    raise ValueError("wavelength contribution must be a positive quantity")
 
-        self.mask = mask if mask is not None else 1.
         self.outliers = False
         self.approx_wavelength = wavelength
+        self.fwhm = fwhm
         #self.wavelength_tolerance = wavelength_tolerance
         #self.wavelength_contribution = wavelength_contribution        
         return None
@@ -200,13 +180,12 @@ class AbsorptionProfile(object):
     def parameters(self):
         """ Return the model parameters. """
 
-        parameters = ["ld"]
-        if self.profile == "voigt":
-            parameters.extend(["sigma", "shape"])
-        elif self.profile == "gaussian":
-            parameters.append("sigma")
+        parameters = ["ld", "shape"]
+        if self.fwhm is None:
+            parameters.append("fwhm")
+        #parameters.extend(["Po", "Vo", "Yo"])
         return parameters
-
+        
 
     def __call__(self, dispersion, continuum=1., **theta):
         """
@@ -239,14 +218,10 @@ class AbsorptionProfile(object):
         """
 
         wavelength = theta.get("wl", self.approx_wavelength)
-        if self.profile == "voigt":
-            depth, shape, sigma = [theta[p] for p in ("ld", "shape", "sigma")]
-            flux = continuum * (1. - depth * voigt(wavelength, sigma, shape,
-                dispersion))
-        elif self.profile == "gaussian":
-            depth, sigma = theta["ld"], theta["sigma"]
-            flux = continuum * (1. - depth * utils.gaussian(wavelength, sigma,
-                dispersion))
+        depth, shape = [theta[p] for p in ("ld", "shape")]
+        fwhm = theta.get("fwhm", self.fwhm)
+        flux = continuum * (1. - depth * voigt(wavelength, fwhm, shape,
+            dispersion))
         return np.vstack([dispersion, flux]).T
 
 
@@ -273,7 +248,7 @@ class AbsorptionProfile(object):
         if not (1 > theta_dict.get("Po", 0.5) > 0) \
         or not (10000 > theta_dict.get("Vo", 1) > 0) \
         or not (1 >= theta_dict.get("ld", 0.5) >= 0) \
-        or not (0.5 > theta_dict.get("sigma", 0.0) >= 0) \
+        or not (0.5 > theta_dict.get("fwhm", 0.0) >= 0) \
         or not (1.0 >= theta_dict.get("shape", 0.0) >= 0):
             return -np.inf
 
@@ -319,26 +294,7 @@ class AbsorptionProfile(object):
         theta_dict = dict(zip(self.parameters, theta))
         expected = self(dispersion=data.disp,
             continuum=continuum, **theta_dict)[:, 1]
-
-        """
-        # Build an extra mask if only nearby points contribute to the model.
-        
-        if self.wavelength_contribution > 0:
-            wavelength = theta_dict.get("wl", self.approx_wavelength)
-            indices = data.disp.searchsorted([
-                wavelength - self.wavelength_contribution,
-                wavelength + self.wavelength_contribution
-            ])
-            additional_mask = np.array([np.nan]*len(data.disp))
-            additional_mask[indices[0]:indices[1]] = 1.
-        
-        else:
-            additional_mask = 1.
-        """
-
-
-        total_mask = self.mask
-        chi_sq = (data.flux - expected)**2 * data.ivariance * total_mask
+        chi_sq = (data.flux - expected)**2 * data.ivariance
         
         if not self.outliers:
             likelihood = -0.5 * chi_sq
@@ -349,7 +305,7 @@ class AbsorptionProfile(object):
             model_likelihood = -0.5 * (chi_sq - np.log(data.ivariance))
             outlier_ivariance = 1.0/(Vo + data.variance)
             outlier_likelihood = -0.5 * ((data.flux - Yo)**2 * outlier_ivariance \
-                * total_mask - np.log(outlier_ivariance))
+                - np.log(outlier_ivariance))
             likelihood = np.logaddexp(
                 np.log(1. - Po) + model_likelihood,
                 np.log(Po)      + outlier_likelihood)
@@ -417,11 +373,10 @@ class AbsorptionProfile(object):
         theta = {
             "wl": self.approx_wavelength,
             "ld": 1.0 - data.flux[index]/continuum_at_line,
-            "fwhm": 0.10,
-            "sigma": 0.05,
+            "fwhm": self.approx_wavelength / 28000.,
             "shape": 0.5,
-            "Po": 0.5,
-            "Vo": 0.01,
+            "Po": 0.50,
+            "Vo": 0.25,
             "Yo": np.median(continuum)
         }
 
