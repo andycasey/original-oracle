@@ -17,6 +17,9 @@ config = {
         "redshift": False,
         "doppler_broadening": True
     },
+    "mask": [
+      [4720.35, 4725]
+    ],
     "ThereminModel": {
         "atomic_lines": [
           [4720.149, 26.1],
