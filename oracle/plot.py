@@ -12,6 +12,8 @@ from matplotlib.ticker import MaxNLocator
 import numpy as np
 from scipy import stats
 
+import acor
+import line
 import specutils
 
 logger = logging.getLogger(__name__)
@@ -334,6 +336,91 @@ def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None
     return fig
 
 
+def autocorrelation(xs, burn_in, labels=None, fig=None):
+    """
+    Create a plot showing the autocorrelation in each parameter.
+
+    :param xs:
+        The sampled values. This should be a three dimensional array of size
+        ``(n_walkers, n_steps, n_parameters)``
+
+    :type xs:
+        :class:`numpy.array`
+
+    :param burn_in: [optional]
+        The number of steps used for burn-in.
+
+    :type burn_in:
+        int
+
+    :param labels: [optional]
+        The labels for each parameter.
+
+    :type labels:
+        tuple of str
+
+    :param fig: [optional]
+        Figure class to use for the plotting.
+
+    :type fig:
+        :class:`matplotlib.Figure`
+
+    :returns:
+        A figure showing the autocorrelation in each parameter at every MCMC step.
+
+    :rtype:
+        :class:`matplotlib.Figure`
+    """
+
+    n_walkers, n_steps, K = xs.shape
+
+    factor = 2.0
+    lbdim = 0.5 * factor
+    trdim = 0.2 * factor
+    whspace = 0.10
+    width = 15.
+    height = factor*K + factor * (K - 1.) * whspace
+    dimy = lbdim + height + trdim
+    dimx = lbdim + width + trdim
+
+    if fig is None:
+        fig, axes = plt.subplots(K, 1, figsize=(dimx, dimy))
+
+    else:
+        try:
+            axes = np.array(fig.axes).reshape((1, K))
+        except:
+            raise ValueError("Provided figure has {0} axes, but data has "
+                "parameters K={1}".format(len(fig.axes), K))
+
+    lm = lbdim / dimx
+    bm = lbdim / dimy
+    trm = (lbdim + height) / dimy
+    fig.subplots_adjust(left=lm, bottom=bm, right=trm, top=trm,
+        wspace=whspace, hspace=whspace)
+
+    for k, ax in enumerate(axes):
+
+        ax.plot(acor.function(np.mean(xs[:, burn_in:, k], axis=0)), color="k")
+
+        if burn_in is not None:
+            ax.axvline(burn_in, color="k", linestyle=":")
+
+        ax.set_xlim(0, n_steps)
+        if k < K - 1:
+            ax.set_xticklabels([])
+        else:
+            ax.set_xlabel("Step")
+
+        ax.yaxis.set_major_locator(MaxNLocator(4))
+        [l.set_rotation(45) for l in ax.get_yticklabels()]
+        if labels is not None:
+            ax.set_ylabel(labels[k])
+            ax.yaxis.set_label_coords(-0.05, 0.5)
+
+    return fig
+
+
 def chains(xs, labels=None, truths=None, truth_color=u"#4682b4", burn_in=None,
     alpha=0.5, fig=None):
     """
@@ -464,9 +551,14 @@ def balance(atomic_data_table, title=None):
         atomic_data_table["abundance"][ionised], facecolor="b", zorder=10)
 
     # Measure slopes by linear regression [TODO] and show them
-    m, b, r_value, p_value, stderr = stats.linregress(
-        x=atomic_data_table["excitation_potential"],
-        y=atomic_data_table["abundance"])
+    y_uncertainty = np.nanmax(np.abs(np.vstack([
+        atomic_data_table["u_pos_abundance"], atomic_data_table["u_neg_abundance"]])), axis=0)
+    assert len(y_uncertainty) == len(atomic_data_table)
+
+    m, b = line.fit(
+        x=atomic_data_table["excitation_potential"][neutral],
+        y=atomic_data_table["abundance"][neutral],
+        y_uncertainty=y_uncertainty[neutral], full_output=True)[:2]
 
     x_limits = np.array(excitation_ax.get_xlim())
     y_limits = excitation_ax.get_ylim()
@@ -506,8 +598,10 @@ def balance(atomic_data_table, title=None):
         facecolor="b", zorder=10)
 
     # Measure slopes by linear regression [TODO] and show them
-    m, b, r_value, p_value, stderr = stats.linregress(
-        x=reduced_equivalent_width, y=atomic_data_table["abundance"])
+    m, b = line.fit(
+        x=reduced_equivalent_width[neutral],
+        y=atomic_data_table["abundance"][neutral],
+        y_uncertainty=y_uncertainty[neutral], full_output=True)[:2]
 
     logger.info("Slope on the reduced equivalent width plot: {0:.4f}".format(m))
     x_limits = np.array(line_strength_ax.get_xlim())
