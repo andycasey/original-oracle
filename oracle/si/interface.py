@@ -1,5 +1,7 @@
 # coding: utf-8
 
+from __future__ import absolute_import, print_function
+
 """ Interface with Spectrum Investigation """
 
 __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
@@ -16,7 +18,7 @@ from string import ascii_letters
 from subprocess import PIPE, Popen
 from textwrap import dedent
 
-from utils import atomic_number
+import utils
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("si")
@@ -279,7 +281,7 @@ class instance(object):
             fp.write("{0:.0f}\n".format(len(abundances)))
             for element, abundance in abundances.iteritems():
                 fp.write("{atomic_number:.0f} {abundance:.3f}\n".format(
-                    atomic_number=atomic_number(element),
+                    atomic_number=utils.atomic_number(element),
                     abundance=abundance))
         # Execute it.
         returncode, stdout, stderr = self.execute()
@@ -419,7 +421,7 @@ class instance(object):
             fp.write("{0:.0f}\n".format(len(abundances)))
             for element, abundance in abundances.iteritems():
                 fp.write("{atomic_number:.0f} {abundance:.3f}\n".format(
-                    atomic_number=atomic_number(element),
+                    atomic_number=utils.atomic_number(element),
                     abundance=abundance))
         # Execute it.
         returncode, stdout, stderr = self.execute()
@@ -596,6 +598,22 @@ def equivalent_width(teff, logg, metallicity, xi, rest_wavelengths, species,
     return equivalent_widths[0] if single_call else np.array(equivalent_widths)
 
 
+@utils.rounder(0, 3, 3, 3, 2, 2)
+@utils.lru_cache(maxsize=128, typed=False)
+def synthesise_single(teff, logg, metallicity, xi, wavelength_start,
+    wavelength_stop, abundances=(('Fe', 7.5), ('Ti', 3.2))):
+    """
+    Test function
+    """
+
+    print("actually synthesising")
+    with instance() as si:
+        data = si.synthesise(teff, logg, metallicity, xi, [wavelength_start, wavelength_stop])
+
+    return data
+
+@utils.rounder(-1, 2, 2, 2, 1)
+@utils.lru_cache(maxsize=1000, typed=False)
 def synthesise(teff, logg, metallicity, xi, wavelengths,
     wavelength_steps=(0.10, 0.005, 1.5), abundances=None, full_output=False,
     threads=1, chunk=True):
