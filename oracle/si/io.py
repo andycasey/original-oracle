@@ -20,7 +20,7 @@ def guess_mode(filename):
     return ["w", "b"][is_binary]
 
 
-def read_line_list(filename, mode=None):
+def read_line_list(filename, mode=None, ignore_blanks=True):
     """
     Read a line list and return a record array.
 
@@ -55,7 +55,8 @@ def read_line_list(filename, mode=None):
     columns = ("wavelength", "excitation_potential", "J_low", "J_up", "xx1",
         "log(gf)", "xx2", "log(c4)?", "log(c6)", "xx3", "xx4", "xx5", "xx6",
         "xx7", "xx8", "xx9", "xx10", "atomic_number", "xx11", "ionised")
-    return np.core.records.fromrecords(records, names=columns, formats=None)
+    data = np.core.records.fromrecords(records, names=columns, formats=None)
+    return data[data["wavelength"] > 0] if ignore_blanks else data
 
 
 def write_line_list(filename, data, mode="w", clobber=False):
@@ -109,9 +110,13 @@ def _write_ascii_line_list(filename, data):
         "{8:9.4f}{9:9.4f}{10:9.4f}{11:10.0f}  {12:>5s}  {13:>3s}  {14:>3s} {15"\
         ":>3s}   {16:>3s}  {17:3.0f}{18:3.0f}{19:3.0f}\n"
 
+    scales = np.ones(len(data.dtype.names))
+    scales[6] = 1e+8
+    
     with open(filename, "w+") as fp:
         for row in data:
-            fp.write(record.format(*row))
+            row_data = row * scales
+            fp.write(record.format(*row_data))
 
     return True
 
@@ -144,10 +149,20 @@ def _pack_binary_structure(data, num=200):
 
     assert num >= len(data)
 
+    if num > len(data):
+        # We will need to copy the data and pad it.
+        data = data.copy()
+        padded_row = np.array([(0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0, 
+            ' ', ' ', ' ', ' ', ' ', 0, 0, 0)], dtype=data.dtype)
+        for i in xrange(num - len(data)):
+            data = np.append(data, padded_row)
+
     colnames = data.dtype.names[:12]
+    scales = np.ones(len(colnames))
+    scales[6] = 1e+8
     formatted_data = struct.pack(
         "<{0}d{0}d{0}f{0}f{0}f{0}f{0}f{0}f{0}f{0}f{0}f{0}l".format(num),
-        *np.array([data[c] for c in colnames]).flatten())
+        *np.array([data[c]*s for c, s in zip(colnames, scales)]).flatten())
 
     sizes = (5, 3, 3, 3, 3)
     colnames = data.dtype.names[12:17]
@@ -182,6 +197,7 @@ def _read_ascii_line(line):
     #0.0000   0.0000         2    uv6   3P   1G  KP   STD   14  0  1
     record = []
     record.extend(map(float, line.split()[:12]))
+    record[6] = record[6] * 1e-8
     record[-1] = int(record[-1])
 
     # Split the text:
@@ -231,7 +247,7 @@ def _read_binary_structure(contents, num=200):
     records = []
     for i in xrange(num):
         record = list(data[i::num])
-        record[6] *= 1e8
+        record[6] *= 1e-8
         record.extend([each[i] for each in str_data])
         record.extend(element_data[i::num])
         records.append(tuple(record))

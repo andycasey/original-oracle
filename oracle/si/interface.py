@@ -18,7 +18,7 @@ from string import ascii_letters
 from subprocess import PIPE, Popen
 from textwrap import dedent
 
-from . import utils
+from . import io, utils
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("si")
@@ -32,7 +32,7 @@ class instance(object):
     _executable = "si_lineform"
     _acceptable_return_codes = (0, )
 
-    def __init__(self, twd_base_dir="/tmp", prefix="si", chars=10, debug=False):
+    def __init__(self, twd_base_dir="/tmp", prefix="si", chars=10, debug=True):
         """
         A context manager for interfacing with SI.
 
@@ -115,6 +115,15 @@ class instance(object):
         logger.debug("Executing input file: {0}".format(
             os.path.join(self.twd, filename)))
 
+        # Last chance to make sure a line list exists.
+        if not os.path.exists(os.path.join(self.twd, "linedata.dat")):
+            # Link the line list.
+            logger.debug("Last-minute inclusion of default line list.")
+            siu_line_list = os.path.abspath(os.path.join(os.path.dirname(
+                os.path.expanduser(__file__)),  "linedata/master_line.dat")) 
+            os.symlink(siu_line_list, os.path.join(self.twd, "linedata.dat"))
+
+
         class Alarm(Exception):
             pass
 
@@ -166,8 +175,8 @@ class instance(object):
         return (p.returncode, stdout, stderr)
 
 
-    def equivalent_width(self, teff, logg, metallicity, xi, rest_wavelength,
-        species, wavelength_steps=(0.10, 0.005, 1.5), abundances=None, lte=True,
+    def equivalent_width(self, teff, logg, metallicity, xi, transition, 
+        wavelength_steps=(0.10, 0.005, 0.15), abundances=None, lte=True,
         full_output=False):
         """
         Return an equivalent width for a transition from ``species`` that occurs
@@ -198,18 +207,12 @@ class instance(object):
         :type xi:
             float
 
-        :param rest_wavelength:
-            The rest wavelength of the transition.
+        :param transition:
+            A record containing the wavelength, species, and atomic data for the
+            transition in question.
 
-        :type rest_wavelength:
-            float
-
-        :param species:
-            The atomic number and ionisation state of the transition (e.g., for
-            Mg I use 12.01).
-    
-        :type species:
-            float
+        :type transition:
+            :class:`numpy.core.records.record`
     
         :param wavelength_steps: [optional]
             The optimal, minimum and maximum wavelength step to synthesise
@@ -247,12 +250,16 @@ class instance(object):
 
         # Remove any old output files so that we don't accidentally confuse
         # ourselves.
-        filenames = ("fort.14", "fort.16")
+        filenames = ("fort.14", "fort.16",)# "linedata.dat")
         for filename in filenames:
             try:
                 os.remove(os.path.join(self.twd, filename))
             except OSError:
                 continue
+
+        # Write the new line list.
+        io.write_line_list(os.path.join(self.twd, "linedata.dat"),
+            np.array([transition]), mode="b", clobber=True)
 
         # Write the new input file/
         with open(os.path.join(self.twd, "fort.10"), "w+") as fp:
@@ -269,7 +276,8 @@ class instance(object):
             {si_bit:.0f}
             {opt_wl_step:.3f}
             """.format(teff=teff, logg=logg, metallicity=metallicity, xi=xi,
-                rest_wavelength=rest_wavelength, species=species,
+                rest_wavelength=transition["wavelength"],
+                species=transition["atomic_number"] + 0.10 * (transition["ionised"] - 1),
                 min_wl_step=wavelength_steps[1] * 1000.,
                 max_wl_step=wavelength_steps[2],
                 opt_wl_step=wavelength_steps[0],
@@ -283,6 +291,7 @@ class instance(object):
                 fp.write("{atomic_number:.0f} {abundance:.3f}\n".format(
                     atomic_number=utils.atomic_number(element),
                     abundance=abundance))
+
         # Execute it.
         returncode, stdout, stderr = self.execute()
         
@@ -292,42 +301,28 @@ class instance(object):
                     usecols=(0, 2, 6, )).flatten()
 
         except IOError:
-            raise
-            logger.warn("No equivalent width found in {0}:".format(
-                os.path.join(self.twd, "fort.16")))
-            logger.warn("SI output (code {0}):\n{1}\n{2}".format(
-                returncode, stdout, stderr))
             raise SIException("no equivalent width found in {0}".format(
                 os.path.join(self.twd, "fort.16")))
 
+        # Grab the synthetic spectra too.
+        try:
+            synthetic_spectra = np.loadtxt(os.path.join(self.twd, "fort.14"))
+
+        except IOError:
+            raise SIException("no synthetic spectra found in {0}".format(
+                os.path.join(self.twd, "fort.14")))
+
+        if len(synthetic_spectra) == 0:
+            raise SIException("no synthetic spectra found in {0}".format(
+                os.path.join(self.twd, "fort.14")))
+
         if full_output:
-            # Grab the synthetic spectra too.
-            try:
-                synthetic_spectra = np.loadtxt(os.path.join(self.twd, "fort.14"))
-
-            except IOError:
-                logger.warn("No synthetic spectra found in {0}:".format(
-                    os.path.join(self.twd, "fort.14")))
-                logger.warn("SI output (code {0}):\n{1}\n{2}".format(
-                    returncode, stdout, stderr))
-                raise SIException("no synthetic spectra found in {0}".format(
-                    os.path.join(self.twd, "fort.14")))
-
-            if len(synthetic_spectra) == 0:
-                logger.warn("No synthetic spectra found in {0}:".format(
-                    os.path.join(self.twd, "fort.14")))
-                logger.warn("SI output (code {0}):\n{1}\n{2}".format(
-                    returncode, stdout, stderr))
-                raise SIException("no synthetic spectra found in {0}".format(
-                    os.path.join(self.twd, "fort.14")))
-
-            return ([wavelength, lower_excitation_potential, equivalent_width],
-                synthetic_spectra, stdout)
+            return (equivalent_width, synthetic_spectra, stdout)
         return equivalent_width
 
 
     def synthesise(self, teff, logg, metallicity, xi, wavelengths,
-        wavelength_steps=(0.10, 0.005, 1.5), abundances=None, line_list=None,
+        wavelength_steps=(0.10, 0.005, 1.5), abundances=None, line_list_filename=None,
         full_output=False):
         """
         Synthesise spectra for a given effective temperature, surface gravity,
@@ -376,10 +371,10 @@ class instance(object):
         :type full_output:
             bool
 
-        :param line_list: [optional]
+        :param line_list_filename: [optional]
             Provide a non-standard binary line list to use.
 
-        :type line_list:
+        :type line_list_filename:
             str
 
         :raises:
@@ -431,13 +426,15 @@ class instance(object):
                     atomic_number=utils.atomic_number(element),
                     abundance=abundance))
 
-        if line_list is not None:
-            logger.debug("Using line list {0}".format(line_list))
+        if line_list_filename is not None:
+            logger.debug("Using line list {0}".format(line_list_filename))
             # By default, __enter__ will have referenced the default line list
             # for us, so we just need to remove that symbolic link and replace
             # it with the line list provided to us.
-            os.remove(os.path.join(self.twd, "linedata.dat"))
-            os.symlink(line_list, os.path.join(self.twd, "linedata.dat"))
+            if line_list_filename != os.path.join(self.twd, "linedata.dat"):
+                os.remove(os.path.join(self.twd, "linedata.dat"))
+                os.symlink(os.path.abspath(os.path.expanduser(line_list_filename)),
+                    os.path.join(self.twd, "linedata.dat"))
 
         # Execute it.
         returncode, stdout, stderr = self.execute()
@@ -446,18 +443,10 @@ class instance(object):
             spectrum = np.loadtxt(os.path.join(self.twd, "fort.14"))
 
         except IOError:
-            logger.warn("No synthetic spectra found in {0}:".format(
-                os.path.join(self.twd, "fort.14")))
-            logger.warn("SI output (code {0}):\n{1}\n{2}".format(
-                returncode, stdout, stderr))
             raise SIException("no fluxes synthesised by SI in {0}".format(
                 os.path.join(self.twd, "fort.14")))
 
         if len(spectrum) == 0:
-            logger.warn("No synthetic spectra found in {0}:".format(
-                os.path.join(self.twd, "fort.14")))
-            logger.warn("SI output (code {0}):\n{1}\n{2}".format(
-                returncode, stdout, stderr))
             raise SIException("no synthetic spectra found in {0}".format(
                     os.path.join(self.twd, "fort.14")))
 
@@ -491,13 +480,12 @@ def _equivalent_width_wrapper(*args, **kwargs):
     return equivalent_width
 
 
-def equivalent_width(teff, logg, metallicity, xi, rest_wavelengths, species,
+def equivalent_width(teff, logg, metallicity, xi, transition,
     wavelength_steps=(0.10, 0.005, 1.5), abundances=None, lte=True,
     full_output=False, threads=1):
     """
-    Return an equivalent width for a transition from ``species`` that occurs
-    near or at ``rest_wavelength`` for the given stellar parameters and
-    abundances.
+    Return an equivalent width (and a spectrum, optionally) for a signle 
+    transition for the given stellar parameters and abundance.
 
     :param teff:
         Effective temperature of the model atmosphere (Kelvin).
@@ -523,18 +511,12 @@ def equivalent_width(teff, logg, metallicity, xi, rest_wavelengths, species,
     :type xi:
         float
 
-    :param rest_wavelengths:
-        The rest wavelength of the transitions.
+    :param transition:
+        A record containing the wavelength, species, and atomic data for the
+        transition in question.
 
-    :type rest_wavelengths:
-        float or list-type of floats
-
-    :param species:
-        The atomic number and ionisation state of the transition (e.g., for
-        Mg I use 12.01).
-
-    :type species:
-        float or list-type of floats
+    :type transition:
+        :class:`numpy.core.records.record`
 
     :param wavelength_steps: [optional]
         The optimal, minimum and maximum wavelength step to synthesise
@@ -577,14 +559,12 @@ def equivalent_width(teff, logg, metallicity, xi, rest_wavelengths, species,
     """
 
     # Check if we only have one spectral region to syntheise.
-    single_call = isinstance(rest_wavelengths, (int, float))
+    single_call = isinstance(transition, (np.core.records.record, ))
     if single_call:
-        species = [species]
-        rest_wavelengths = [rest_wavelengths]
+        transitions = np.array([transition])
     else:
-        assert len(species) == len(rest_wavelengths), """Species and rest
-            wavelengths must be of the same length"""
-
+        transitions = transition
+    
     # Check number of threads to use.
     threads = [threads, mp.cpu_count()][threads < 0]
 
@@ -592,18 +572,18 @@ def equivalent_width(teff, logg, metallicity, xi, rest_wavelengths, species,
     if threads == 1:
         # Serial killer.
         with instance() as si:
-            for specie, rest_wavelength in zip(species, rest_wavelengths):
+            for each in transitions:
                 equivalent_widths.append(si.equivalent_width(teff, logg,
-                    metallicity, xi, rest_wavelength, specie, wavelength_steps,
-                    abundances, lte, full_output))
+                    metallicity, xi, each, wavelength_steps, abundances,
+                    lte, full_output))
     else:
         
         pool = mp.Pool(threads)
         results = []
-        for specie, rest_wavelength in zip(species, rest_wavelengths):
+        for each in transitions:
             results.append(pool.apply_async(_equivalent_width_wrapper,
-                args=(teff, logg, metallicity, xi, rest_wavelength, specie,
-                    wavelength_steps, abundances, lte, full_output)))
+                args=(teff, logg, metallicity, xi, each, wavelength_steps,
+                    abundances, lte, full_output)))
 
         equivalent_widths = [result.get() for result in results]
 
@@ -628,8 +608,91 @@ def synthesise_single(teff, logg, metallicity, xi, wavelength_start,
 
     return data
 
-def synthesise(teff, logg, metallicity, xi, wavelengths,
-    wavelength_steps=(0.10, 0.005, 1.5), abundances=None, full_output=False,
+
+def synthesise_transition(teff, logg, metallicity, xi, transition, surrounding=2,
+    wavelength_steps=(0.10, 0.005, 1.5), abundances=None, full_output=False):
+    """
+    Synthesise spectrum surrounding a single transition for a given effective
+    temperature, surface gravity, abundances and microturbulence.
+
+    :param teff:
+        Effective temperature of the model atmosphere (Kelvin).
+
+    :type teff:
+        float
+
+    :param logg:
+        Surface gravity of the model atmosphere.
+
+    :type logg:
+        float
+
+    :param metallicity:
+        Mean metallicity of the model atmosphere.
+
+    :type metallicity:
+        float
+
+    :param xi:
+        Microturbulence in the model atmosphere (km/s).
+
+    :type xi:
+        float
+
+    :param transition:
+        A record of the transition to synthesise.
+
+    :type transition:
+        :class:`numpy.core.records.record`
+
+    :param surrounding:
+        The amount of spectrum to synthesise surrounding the line (either side).
+
+    :type surrounding:
+        float
+
+    :param wavelength_steps: [optional]
+        The optimal, minimum and maximum wavelength step to synthesise
+        (Angstroms).
+
+    :type wavelength_step_limits:
+        tuple
+
+    :param abundances: [optional]
+        The abundances (values) of different elements (keys).
+
+    :type abundances:
+        dict
+
+    :param full_output: [optional]
+        Return the SI output as well as the synthesised spectra.
+
+    :type full_output:
+        bool
+    """
+
+    with instance() as si:
+
+        # Overwrite line list
+        line_list_filename = os.path.join(si.twd, "linedata.dat")
+        os.remove(line_list_filename)
+        io.write_line_list(line_list_filename, np.array([transition]), mode="b")
+
+        region = (
+            transition["wavelength"] - surrounding,
+            transition["wavelength"] + surrounding
+        )
+        # Synthesise
+        spectrum, stdout = si.synthesise(teff, logg, metallicity, xi, region,
+            wavelength_steps, abundances, full_output=True)
+
+    if full_output:
+        return (spectrum, stdout)
+    return spectrum
+
+
+def synthesise(teff, logg, metallicity, xi, wavelengths, wavelength_steps=(0.10,
+    0.005, 1.5), abundances=None, line_list_filename=None, full_output=False, 
     threads=1, chunk=True):
     """
     Synthesise spectra for a given effective temperature, surface gravity,
@@ -671,6 +734,12 @@ def synthesise(teff, logg, metallicity, xi, wavelengths,
 
     :type abundances:
         dict
+
+    :param line_list_filename: [optional]
+        Provide a non-standard binary line list to use.
+
+    :type line_list_filename:
+        str
 
     :param full_output: [optional]
         Return the SI output as well as the synthesised spectra.
@@ -722,7 +791,7 @@ def synthesise(teff, logg, metallicity, xi, wavelengths,
         with instance() as si:
             for wavelength_range, wavelength_step in zip(wavelengths, wavelength_steps):
                 spectra.append(si.synthesise(teff, logg, metallicity, xi,
-                    wavelength_range, wavelength_step, abundances, False))
+                    wavelength_range, wavelength_step, abundances, line_list_filename, False))
     else:
         # Thread dat shit.
         if chunk:
@@ -745,7 +814,7 @@ def synthesise(teff, logg, metallicity, xi, wavelengths,
         for wavelength_range, wavelength_step in zip(wavelengths, wavelength_steps):
             results.append(pool.apply_async(_synthesise_wrapper, args=(teff, logg,
                 metallicity, xi, wavelength_range, wavelength_step, abundances,
-                True)))
+                line_list_filename, True)))
 
         # Join the chunks back together. 
         chunked_spectrum = []
