@@ -139,7 +139,7 @@ class Model(object):
         return None
 
 
-    def mask(self, dispersion, z=0., fill_value=np.nan):
+    def mask(self, dispersion, z=0., fill_value=np.nan, use_cached=False):
         """
         Return an array mask for a given dispersion array and redshift, based on
         the mask information provided in the model configuration file.
@@ -170,7 +170,7 @@ class Model(object):
             :class:`numpy.array`
         """
 
-        if z == 0:
+        if z == 0 and use_cached: 
             try:
                 # Speed hack: see if we have a copy of a rest-frame mask.
                 return self._rest_mask
