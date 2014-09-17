@@ -32,7 +32,7 @@ class instance(object):
     _executable = "si_lineform"
     _acceptable_return_codes = (0, )
 
-    def __init__(self, twd_base_dir="/tmp", prefix="si", chars=10, debug=True):
+    def __init__(self, twd_base_dir="/tmp", prefix="si", chars=10, debug=False):
         """
         A context manager for interfacing with SI.
 
@@ -327,7 +327,8 @@ class instance(object):
 
 
     def synthesise(self, teff, logg, metallicity, xi, wavelengths,
-        wavelength_steps=(0.10, 0.005, 1.5), abundances=None, full_output=False):
+        wavelength_steps=(0.10, 0.005, 1.5), abundances=None, line_list=None,
+        full_output=False):
         """
         Synthesise spectra for a given effective temperature, surface gravity,
         metallicity, microturbulence, and abundances.
@@ -374,6 +375,12 @@ class instance(object):
 
         :type full_output:
             bool
+
+        :param line_list: [optional]
+            Provide a non-standard binary line list to use.
+
+        :type line_list:
+            str
 
         :raises:
             SIException
@@ -423,6 +430,15 @@ class instance(object):
                 fp.write("{atomic_number:.0f} {abundance:.3f}\n".format(
                     atomic_number=utils.atomic_number(element),
                     abundance=abundance))
+
+        if line_list is not None:
+            logger.debug("Using line list {0}".format(line_list))
+            # By default, __enter__ will have referenced the default line list
+            # for us, so we just need to remove that symbolic link and replace
+            # it with the line list provided to us.
+            os.remove(os.path.join(self.twd, "linedata.dat"))
+            os.symlink(line_list, os.path.join(self.twd, "linedata.dat"))
+
         # Execute it.
         returncode, stdout, stderr = self.execute()
 

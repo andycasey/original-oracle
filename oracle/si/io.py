@@ -6,14 +6,21 @@ import os
 import struct
 import numpy as np
 
-__all__ = ["chunk", "read_line_list", "write_line_list"]
+__all__ = ["read_line_list", "write_line_list"]
 
 
 def chunk(l, n):
     return [l[i:i + n] for i in range(0, len(l), n)]
 
+def guess_mode(filename):
+    textchars = ''.join(map(chr, [7,8,9,10,12,13,27] + range(0x20, 0x100)))
+    is_binary_string = lambda bytes: bool(bytes.translate(None, textchars))
+    with open(filename) as fp:
+        is_binary = is_binary_string(fp.read(1024))
+    return ["w", "b"][is_binary]
 
-def read_line_list(filename, mode="w"):
+
+def read_line_list(filename, mode=None):
     """
     Read a line list and return a record array.
 
@@ -24,8 +31,9 @@ def read_line_list(filename, mode="w"):
         str
 
     :param mode: [optional]
-        The mode to open the file in. The default (w) indicates ASCII format.
-        Specifying the mode as "b" indicates binary format.
+        The mode to open the file in. Specifying mode "w" indicates ASCII format.
+        Specifying the mode as "b" indicates binary format. If no mode is given,
+        it will be guessed from the file contents.
 
     :type mode:
         str
@@ -35,6 +43,9 @@ def read_line_list(filename, mode="w"):
     """
 
     # Read it into tuples, regardless of binary/ascii
+    if mode is None:
+        mode = guess_mode(filename)
+
     if "b" in mode.lower():
         records = _read_binary_line_list(filename)
     else:
@@ -64,7 +75,7 @@ def write_line_list(filename, data, mode="w", clobber=False):
         :class:`np.core.records.recarray`
 
     :param mode: [optional] 
-        The mode to open the file in. The default (w) indicates ASCI format.
+        The mode to open the file in. The default (w) indicates ASCII format.
         Specifying the mode as "b" indicates binary format.
 
     :type mode:
