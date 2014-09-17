@@ -8,6 +8,7 @@ __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 
 import collections
 import logging
+import os
 
 import numpy as np
 from scipy import optimize as op
@@ -147,20 +148,67 @@ class SpectrumModel(Model):
 
         self.data = data
         self._optimised_theta = None
+
+        assert os.path.exists(self.config["ThereminModel"]["clean_line_list_filename"])
+        assert os.path.exists(self.config["ThereminModel"]["blend_line_list_filename"])
+
+        self.atomic_lines = si.io.read_line_list(
+            self.config["ThereminModel"]["clean_line_list_filename"])
+
         _ = self.parameters
 
-        print("Checking line lists>...")
+
+        """
         # Check the line list filename is provided, and match against the atomic
         # transitions listed
-        all_transitions = si.io.read_line_list(self.config["ThereminModel"]["line_list_filename"])
+        line_list_filename = self.config["ThereminModel"]["line_list_filename"]
+        logger.info("Checking line list {0}".format(line_list_filename))
+
+        wl_tolerance = 0.001
+        all_transitions = si.io.read_line_list(line_list_filename)
         for transition in self.config["ThereminModel"]["atomic_lines"]:
 
             # Check the transition exists in the line list.
             wavelength, species = transition[:2]
-            #np.less_equal(all_transitions["wavelength"] - wavelength, )
-            raise a
+            matches = np.less_equal(np.abs(all_transitions["wavelength"] - wavelength),
+                wl_tolerance)
+            matches *= (all_transitions["atomic_number"] == int(species))
+            matches *= (all_transitions["ionised"] == int((species % 1)*10 + 1))
+
+            if not matches.any():
+                raise ValueError("{0} {1:.0f} transition at {2:.3f} Angstroms "\
+                    "not in line list {3}".format(utils.element(species),
+                        ((species % 1)*10)+1, wavelength, line_list_filename))
+        """
 
         return None
+
+
+    def check_line_lists(self, wavelength_tolerance=0.001):
+        """
+        Check that the transitions in the clean line list do not appear in the
+        complete line list.
+        """
+
+        complete_filename = self.config["ThereminModel"]["blend_line_list_filename"]
+        complete_line_list = si.io.read_line_list(complete_filename)
+
+        for transition in self.atomic_lines:
+
+            # Ensure the transition does not exist in the complete line list.
+            matches = np.less_equal(np.abs(complete_line_list["wavelength"] \
+                - transition["wavelength"]), wavelength_tolerance)
+            matches *= (complete_line_list["atomic_number"] == transition["atomic_number"])
+            matches *= (complete_line_list["ionised"] == transition["ionised"])
+
+            if matches.any():
+                raise ValueError("{0} {1:.0f} transition at {2:.3f} Angstroms "\
+                    "is in both the clean ({3}) and complete ({4}) line list "\
+                    .format(utils.element(transition["atomic_number"]),
+                        transition["atomic_number"], transition["wavelength"],
+                        self.config["ThereminModel"]["clean_line_list_filename"],
+                        complete_filename))
+        return True
 
 
     @property
@@ -175,9 +223,12 @@ class SpectrumModel(Model):
         parameters = []
         transition_mapping = {}
         num_channels = len(self.data)
-        for i, transition in enumerate(self.config["ThereminModel"]["atomic_lines"]):
-            wavelength, species = transition[:2]
+        for i, transition in enumerate(self.atomic_lines):
 
+            wavelength = transition["wavelength"]
+            element = utils.element(transition["atomic_number"])
+            ionised = transition["ionised"] 
+            
             # No point adding the transition if it is outside of our observed
             # spectral range.
             in_observed_range = False
@@ -192,12 +243,12 @@ class SpectrumModel(Model):
                 # This transition is not in any of the observed spectral ranges
                 # so let's ignore it.
                 logger.info("Ignoring {0} {1:.0f} transition @ {2:.1f} as it "\
-                    "is not in our observed spectral range".format(
-                        utils.element(species), ((species % 1)*10)+1, wavelength))
+                    "is not in our observed spectral range".format(element,
+                        ionised, wavelength))
                 continue
 
-            parameters.append(self._abundance_key.format(
-                utils.element(species), ((species % 1)*10)+1, wavelength))
+            parameters.append(self._abundance_key.format(element, ionised,
+                wavelength))
 
         # Dumb check.
         assert len(parameters) == len(set(parameters)), "At least one atomic "\
@@ -233,25 +284,29 @@ class SpectrumModel(Model):
 
 
     def _synthesise(self, data_index, effective_temperature, surface_gravity,
-        metallicity, xi, **theta):
+        metallicity, xi, line_list_filename=None, **theta):
 
         observed = self.data[data_index]
         expected_flux = np.ones((len(observed.disp)))
 
+        # Synthesise everything except the atomic lines:
+
         for index in self._transition_mapping[data_index]:
-            wavelength, species = self.config["ThereminModel"]["atomic_lines"][index][:2]
+            wavelength = self.atomic_lines[index]["wavelength"]
+            element = utils.element(self.atomic_lines[index]["atomic_number"])
+            ionised = self.atomic_lines[index]["ionised"] 
 
             wavelength_region = (
                 wavelength - self.synth_surrounding,
                 wavelength + self.synth_surrounding
             )
-            keyword = self._abundance_key.format(utils.element(species),
-                ((species % 1)*10)+1, wavelength)
+            keyword = self._abundance_key.format(element, ionised, wavelength)
             abundance = theta.get(keyword, metallicity)
 
             synthesised_spectrum = si.synthesise(effective_temperature,
                 surface_gravity, metallicity, xi, wavelength_region,
-                abundances={utils.element(species): abundance})
+                abundances={utils.element(species): abundance},
+                line_list_filename=line_list_filename)
 
             # Interpolate the synthesised spectrum onto the observed pixels
             wl_indices = observed.disp.searchsorted(wavelength_region)
@@ -272,15 +327,74 @@ class SpectrumModel(Model):
         Produce some synthetic spectra to compare against the data.
         """
 
+        clean_line_list = self.config["ThereminModel"]["clean_line_list_filename"]
+        blend_line_list = self.config["ThereminModel"]["blend_line_list_filename"]
+
+        # For each channel
         expected_fluxes = []
         for i, observed in enumerate(self.data):
 
-            # Synthesise the spectrum
-            expected_flux = self._synthesise(i, effective_temperature,
-                surface_gravity, metallicity, xi, **theta)
+            expected_flux = np.ones(len(observed.disp))
+            pixel_size = np.mean(np.diff(observed.disp))
 
-            # Apply continuum, redshift, and doppler broadening,
-            # The continuum enters multiplicatively with the expected fluxes.
+            # Synthesise the blended spectrum
+            # [TODO] Only do this for the ranges we care about.
+            blended_spectrum = si.synthesise(effective_temperature,
+                surface_gravity, metallicity, xi, (observed.disp[0], observed.disp[-1]),
+                wavelength_steps=(pixel_size, pixel_size, pixel_size),
+                line_list_filename=blend_line_list)
+
+            # Convolve the blended spectrum flux
+            # [TODO] This should be done by resolution
+            if self.config["model"]["doppler_broadening"]:
+                sigma = theta["doppler_sigma_{0}".format(i)]
+                kernel = (sigma/2.3548200450309493)/pixel_size
+
+                blended_spectrum[:, 1] = gaussian_filter1d(blended_spectrum[:, 1],
+                    kernel)
+
+            expected_flux *= np.interp(observed.disp,
+                blended_spectrum[:, 0], blended_spectrum[:, 1], 
+                left=1., right=1.)
+
+            # Redshift to apply
+            z = theta["z"] if "z" in theta else theta.get("z_{0}".format(i), 0)
+            for j in self._transition_mapping[i]:
+
+                element = utils.element(self.atomic_lines[j]["atomic_number"])
+                ionised = self.atomic_lines[j]["ionised"]
+                wavelength = self.atomic_lines[j]["wavelength"]
+                abundance = theta[self._abundance_key.format(element, ionised, 
+                    wavelength)]
+                
+                wavelength_region = (
+                    wavelength - self.synth_surrounding,
+                    wavelength + self.synth_surrounding
+                )
+
+                # Synthesise the transition
+                # [TODO] Create a singular line list
+                transition_spectrum = si.synthesise_transition(effective_temperature,
+                    surface_gravity, metallicity, xi, self.atomic_lines[j],
+                    surrounding=self.synth_surrounding,
+                    abundances={element: abundance},
+                    wavelength_steps=(pixel_size, pixel_size, pixel_size))
+
+                # Smoothing
+                if self.config["model"]["doppler_broadening"]:
+                    transition_spectrum[:, 1] = gaussian_filter1d(
+                        transition_spectrum[:, 1], kernel)
+
+                # Put onto observed dispersion map
+                transition_flux = np.interp(observed.disp,
+                    transition_spectrum[:, 0] * (1. + z),
+                    transition_spectrum[:, 1],
+                    left=1., right=1.)
+
+                # [TODO] Only applicable for weak lines
+                expected_flux *= transition_flux
+
+            # Apply continuum to expected fluxes
             if self.config["model"]["continuum"]:
                 
                 # Apply continuum transformation to the model spectra.
@@ -291,25 +405,6 @@ class SpectrumModel(Model):
 
                 if len(coefficients) > 0:
                     expected_flux *= np.polyval(coefficients, observed.disp)
-
-            # Redshift needs to be done before convolution because we observe
-            # certain lines at redshifted wavelengths, so we must place those
-            # lines at the right wavelengths so they are convolved correctly.
-            if self.config["model"]["redshift"]:
-                z = theta["z"] if "z" in theta else theta["z_{0}".format(i)]
-                redshifted_disp = (1. + z) * observed.disp
-
-                # Interpolate the fluxes onto the observed dispersion.
-                expected_flux = np.interp(observed.disp, redshifted_disp,
-                    expected_flux, left=np.nan, right=np.nan)
-
-            if self.config["model"]["doppler_broadening"]:
-                sigma = theta["doppler_sigma_{0}".format(i)]
-
-                # Convolve the expected fluxes.
-                # [TODO] This should be done by resolution
-                kernel = (sigma/2.3548200450309493)/np.mean(np.diff(observed.disp))
-                gaussian_filter1d(expected_flux, kernel, output=expected_flux)
 
             expected_fluxes.append(expected_flux)
 
@@ -327,10 +422,13 @@ class SpectrumModel(Model):
         synthesis_required = \
             (self.config["model"]["redshift"] or self.config["model"]["continuum"])
 
+        line_list_filename = self.config["ThereminModel"]["blend_line_list_filename"]
+
         # Synthesise spectrum.
         if synthesis_required:
             expected_fluxes = [self._synthesise(i, effective_temperature, 
-                surface_gravity, metallicity, xi) for i in range(len(self.data))]
+                surface_gravity, metallicity, xi, line_list_filename=line_list_filename) \
+                for i in range(len(self.data))]
 
         # Cross-correlate with the data to obtain estimate of radial velocity.
         if self.config["model"]["redshift"]:
@@ -354,23 +452,19 @@ class SpectrumModel(Model):
         return initial_guess
 
 
-    def _optimise_transition(self, effective_temperature, surface_gravity, 
-        metallicity, xi, transition_index, full_output=False, **theta):
+    def _optimise_transition(self, observed, blending_spectrum, effective_temperature,
+        surface_gravity, metallicity, xi, transition_index, full_output=False,
+        **theta):
         """
         Fits an absorption profile leaving the redshift + continuum fixed.
         """
 
-        wavelength, species = self.config["ThereminModel"]["atomic_lines"][transition_index][:2]
+        element = utils.element(self.atomic_lines[transition_index]["atomic_number"])
+        ionised = self.atomic_lines[transition_index]["ionised"]
+        wavelength = self.atomic_lines[transition_index]["wavelength"]
+        clean_line_list_filename = self.config["ThereminModel"]["clean_line_list_filename"]
 
-        # Where is this line located? In which data channel?
-        for i, transitions in self._transition_mapping.iteritems():
-            if transition_index in transitions:
-                break
-        else:
-            raise ValueError("transition index {0} not found in any observed "\
-                "data channel".format(transition_index))
-
-        observed = self.data[i]
+        data_index = self.data.index(observed)
         assert observed.disp[-1] >= wavelength >= observed.disp[0]
 
         # Get data around that line
@@ -383,18 +477,19 @@ class SpectrumModel(Model):
         disp = observed.disp.__getslice__(*indices)
         flux = observed.flux.__getslice__(*indices).copy()
         ivariance = observed.ivariance.__getslice__(*indices)
-
-        # Create a mask for this redshift, and apply it to the flux values
-        z = theta["z"] if "z" in theta else theta.get("z_{0}".format(i), 0)
-        flux *= self.mask(disp, z, use_cached=False)
-        sigma = theta.get("doppler_sigma_{0}".format(i), 0)
-        kernel = (sigma/2.3548200450309493)/np.mean(np.diff(disp))
         
-        # Create a continuum function 
+        # Create a mask for this redshift, and apply it to the flux values
+        z = theta["z"] if "z" in theta else theta.get("z_{0}".format(data_index), 0)
+        flux *= self.mask(disp, z, use_cached=False)
+        sigma = theta.get("doppler_sigma_{0}".format(data_index), 0)
+        pixel_size = np.mean(np.diff(disp))
+        kernel = (sigma/2.3548200450309493)/pixel_size
+        
+        # Continuum
         if self.config["model"]["continuum"]:
             j, coefficients = 0, []
-            while "c_{0}_{1}".format(i, j) in theta:
-                coefficients.append(theta["c_{0}_{1}".format(i, j)])
+            while "c_{0}_{1}".format(data_index, j) in theta:
+                coefficients.append(theta["c_{0}_{1}".format(data_index, j)])
                 j += 1
 
             if len(coefficients) > 0:
@@ -402,26 +497,33 @@ class SpectrumModel(Model):
         else:
             continuum = 1.
 
-        mean_pixel_size = np.mean(np.diff(disp))
-
+        
         def chi_sq(args, full_output=False):
 
             abundance = args[0]
-            expected = si.synthesise(effective_temperature,
-                surface_gravity, metallicity, xi, wavelength_region,
-                abundances={utils.element(species): abundance},
-                wavelength_steps=(mean_pixel_size, mean_pixel_size, mean_pixel_size))
+            transition_spectrum = si.synthesise_transition(effective_temperature,
+                surface_gravity, metallicity, xi, self.atomic_lines[transition_index],
+                surrounding=self.synth_surrounding, abundances={element: abundance},
+                wavelength_steps=(pixel_size, pixel_size, pixel_size))
+
+            blending_flux = np.interp(transition_spectrum[:, 0],
+                blending_spectrum[:, 0], blending_spectrum[:, 1],
+                left=np.nan, right=np.nan)
+            
+            # [TODO] This approximation is only suitable for weak regimes.
+            transition_spectrum[:, 1] *= blending_flux
 
             # Any convolution?
             if kernel > 0:
-                expected[:, 1] = gaussian_filter1d(expected[:, 1], kernel)
+                transition_spectrum[:, 1] = gaussian_filter1d(
+                    transition_spectrum[:, 1], kernel)
 
-            # Continuum and redshift.
-            expected[:, 1] *= continuum
-            
             # Put it on the observed pixel space.
-            expected = np.interp(disp, (1. + z) * expected[:, 0], expected[:, 1],
-                left=np.nan, right=np.nan)
+            expected = np.interp(disp, transition_spectrum[:, 0] * (1. + z),
+                transition_spectrum[:, 1], left=np.nan, right=np.nan)
+
+            # Continuum
+            expected *= continuum
 
             chi_sq = np.nansum((flux - expected)**2 * ivariance)
             if full_output:
@@ -433,11 +535,10 @@ class SpectrumModel(Model):
         xopt, fopt, direc, niter, nfunc, warnflag = op.fmin_powell(
             chi_sq, [metallicity], xtol=0.01, disp=False, full_output=True)
         self._opt_warn_message(warnflag, niter, nfunc, "fitting {0} {1:.0f} "\
-            "transition at {2:.1f} Angstroms".format(utils.element(species),
-                ((species % 1)*10) + 1, wavelength))
+            "transition at {2:.1f} Angstroms".format(element, ionised, wavelength))
 
         xopt = xopt.reshape(-1)
-
+        
         if full_output:
             return (xopt, fopt, direc, niter, nfunc, warnflag)
         return xopt
@@ -453,58 +554,82 @@ class SpectrumModel(Model):
             if use_previously_optimised and self._optimised_theta is not None:
                 logger.info("Using previously optimised theta as initial guess:"\
                     "{0}".format(self._optimised_theta))
-                initial_guess = self._optimised_theta
+                initial_theta = self._optimised_theta
 
             else:
-                initial_guess = self.initial_guess(effective_temperature,
+                initial_theta = self.initial_guess(effective_temperature,
                     surface_gravity, metallicity, xi)
 
         # Create the final dictionary result
         optimal_theta = {}
-        optimal_theta.update(initial_guess)
+        optimal_theta.update(initial_theta)
 
-        initial_fluxes = self(effective_temperature, surface_gravity, metallicity,
-            xi, **initial_guess)
+        # Synthesise all the channels as they are, taking continuum, etc into
+        # account
+        line_list_filename = self.config["ThereminModel"]["blend_line_list_filename"]
+
+        blending_spectra = [si.synthesise(effective_temperature, surface_gravity,
+            metallicity, xi, (s.disp[0], s.disp[-1]), line_list_filename=line_list_filename) \
+                for s in self.data]
+
 
         # Fit each line/neighbouring individually using the current estimate of
         # redshift, continuum, etc.
-        all_employed_transitions = sum(self._transition_mapping.values(), [])
-        for i, transition in enumerate(self.config["ThereminModel"]["atomic_lines"]):
-            if i not in all_employed_transitions: continue
+        for i, (observed_spectrum, blending_spectrum) \
+        in enumerate(zip(self.data, blending_spectra)):
 
-            wavelength, species = transition[:2]
-            xopt, fopt, direc, niter, nfunc, warnflag = self._optimise_transition(
-                effective_temperature, surface_gravity, metallicity, xi, i, 
-                full_output=True, **initial_guess)
+            sigma = initial_theta.get("doppler_sigma_{0}".format(i), 0)
+            if sigma > 0:
+                # [TODO] do by resolution
+                pixel_size = np.mean(np.diff(observed_spectrum.disp))
+                kernel = (sigma/2.3548200450309493)/pixel_size
+            
+                blending_spectrum[:, 1] = gaussian_filter1d(
+                    blending_spectrum[:, 1], kernel)
 
-            print("Found {0:.2f} for {1}".format(
-                xopt[0], self._abundance_key.format(utils.element(species),
-                ((species % 1)*10)+1, wavelength)))
-            optimal_theta[self._abundance_key.format(utils.element(species),
-                ((species % 1)*10)+1, wavelength)] = xopt[0]
+            transition_indices = self._transition_mapping[i]
+            for j in transition_indices:
+
+                xopt, fopt, direc, niter, nfunc, warnflag = self._optimise_transition(
+                    observed_spectrum, blending_spectrum, effective_temperature,
+                    surface_gravity, metallicity, xi, j, full_output=True, **initial_theta)
+
+                wavelength = self.atomic_lines[j]["wavelength"]
+                element = utils.element(self.atomic_lines[j]["atomic_number"])
+                ionised = self.atomic_lines[j]["ionised"] 
+
+                print("Found {0:.2f} for {1}".format(xopt[0], 
+                    self._abundance_key.format(element, ionised, wavelength)))
+
+                optimal_theta[self._abundance_key.format(element, ionised,
+                    wavelength)] = xopt[0]
+
 
         # Fit everything simultaneously
+        initial_fluxes = self(effective_temperature, surface_gravity, metallicity,
+            xi, **initial_theta)
+
         optimal_fluxes = self(effective_temperature, surface_gravity, metallicity,
             xi, **optimal_theta)
 
         import matplotlib.pyplot as plt
         fig, axes = plt.subplots(len(self.data))
-        for ax, observed, initial, optimal \
-        in zip(axes, self.data, initial_fluxes, optimal_fluxes):
+        for ax, observed, initial, optimal, blended, \
+        in zip(axes, self.data, initial_fluxes, optimal_fluxes, blending_spectra):
             ax.plot(observed.disp, observed.flux, 'k')
-            ax.plot(observed.disp, initial, 'r')
-            ax.plot(observed.disp, optimal, 'g')
+            ax.plot(observed.disp, initial, 'r', label='initial')
+            ax.plot(observed.disp, optimal, 'g', label='final')
+            ax.plot(blended[:, 0], blended[:,1], c="#666666", label='blended')
 
-        for i, transition in enumerate(self.config["ThereminModel"]["atomic_lines"]):
-            if i not in all_employed_transitions: continue
-
-            wavelength, species = transition[:2]
-
+        ax.legend()
+        for i, transition in enumerate(self.atomic_lines):
+            if i not in sum(self._transition_mapping.values(), []): continue
+            
             # Which thing are we in?
             for j, indices in self._transition_mapping.iteritems():
                 if i in indices: break
 
-            axes[j].axvline(wavelength, 0, 1.2, c="b")
+            axes[j].axvline(transition["wavelength"], 0, 1.2, c="b")
 
 
         # Fit all lines + redshift + continuum + doppler simultaneously
