@@ -20,8 +20,7 @@ from textwrap import dedent
 
 from . import io, utils
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger("si")
+logger = logging.getLogger("oracle")
 
 class SIException(Exception):
     pass
@@ -32,7 +31,7 @@ class instance(object):
     _executable = "si_lineform"
     _acceptable_return_codes = (0, )
 
-    def __init__(self, twd_base_dir="/tmp", prefix="si", chars=10, debug=True):
+    def __init__(self, twd_base_dir="/tmp", prefix="si", chars=10, debug=False):
         """
         A context manager for interfacing with SI.
 
@@ -594,10 +593,10 @@ def equivalent_width(teff, logg, metallicity, xi, transition,
     return equivalent_widths[0] if single_call else np.array(equivalent_widths)
 
 
-#@utils.rounder(0, 3, 3, 3, 2, 2)
-#@utils.lru_cache(maxsize=128, typed=False)
-def synthesise_transition(teff, logg, metallicity, xi, transition, surrounding=2,
-    wavelength_steps=(0.10, 0.005, 1.5), abundances=None, full_output=False):
+@utils.rounder(0, 3, 3, 3, None, 3, 3, 3)
+@utils.lru_cache(maxsize=128, typed=False)
+def synthesise_transition(teff, logg, metallicity, xi, transition, abundance,
+    surrounding=2, wavelength_steps=(0.10, 0.005, 1.5), full_output=False):
     """
     Synthesise spectrum surrounding a single transition for a given effective
     temperature, surface gravity, abundances and microturbulence.
@@ -645,12 +644,6 @@ def synthesise_transition(teff, logg, metallicity, xi, transition, surrounding=2
     :type wavelength_step_limits:
         tuple
 
-    :param abundances: [optional]
-        The abundances (values) of different elements (keys).
-
-    :type abundances:
-        dict
-
     :param full_output: [optional]
         Return the SI output as well as the synthesised spectra.
 
@@ -667,7 +660,17 @@ def synthesise_transition(teff, logg, metallicity, xi, transition, surrounding=2
         # Overwrite line list
         line_list_filename = os.path.join(si.twd, "linedata.dat")
         os.remove(line_list_filename)
-        io.write_line_list(line_list_filename, np.array([transition]), mode="b")
+
+        if isinstance(transition, tuple):
+            # Put to record array.
+            line_list_data = io._tuple_to_recarray(transition)
+            transition = line_list_data[0]
+
+        else:
+            # It's a single record, but the write_line_list expects many.
+            line_list_data = np.array([transition])
+
+        io.write_line_list(line_list_filename, line_list_data, mode="b")
 
         region = (
             transition["wavelength"] - surrounding,
@@ -675,11 +678,22 @@ def synthesise_transition(teff, logg, metallicity, xi, transition, surrounding=2
         )
         # Synthesise
         spectrum, stdout = si.synthesise(teff, logg, metallicity, xi, region,
-            wavelength_steps, abundances, full_output=True)
+            wavelength_steps, 
+            abundances={utils.element(transition["atomic_number"]): abundance},
+            full_output=True)
 
         # Parse the equivalent width from the SI standard output
-        index = stdout.split("\n").index(" Lineformation")
-        equivalent_width = float(stdout[index + 3])
+        stdout_split = stdout.split("\n")
+
+        # Let's go backwards, it will be faster:
+        for line in stdout_split[::-1]:
+            if line.startswith(" equivalent width: "):
+                equivalent_width = float(line.strip().split()[2])
+                break
+        
+        else:
+            raise ValueError("No equivalent width found for transition at"\
+                " {0:.2f} Angstroms".format(transition["wavelength"]))
 
     if full_output:
         return (spectrum, equivalent_width, stdout)

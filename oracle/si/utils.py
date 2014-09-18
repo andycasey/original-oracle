@@ -14,6 +14,8 @@ from threading import RLock
 import numpy as np
 from scipy.special import wofz
 
+logger = logging.getLogger("oracle")
+
 def chunk(l, n):
     return [l[i:i + n] for i in range(0, len(l), n)]
 
@@ -191,7 +193,10 @@ def rounder(*decimals, **decimal_kwargs):
                 if decimal is None:
                     rounded_args.append(arg)
                 else:
-                    rounded_args.append(np.round(arg, decimal))
+                    if isinstance(arg, (float, int)):
+                        rounded_args.append(np.round(arg, decimal))
+                    else:
+                        rounded_args.append(tuple(np.round(arg, decimal)))
 
             # Extend with arguments that don't have precision requirements
             missing_args = len(args) - len(rounded_args)

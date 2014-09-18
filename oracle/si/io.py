@@ -19,6 +19,12 @@ def guess_mode(filename):
         is_binary = is_binary_string(fp.read(1024))
     return ["w", "b"][is_binary]
 
+def _tuple_to_recarray(transition):
+    columns = ("wavelength", "excitation_potential", "J_low", "J_up", "xx1",
+        "log(gf)", "xx2", "log(c4)?", "log(c6)", "xx3", "xx4", "xx5", "xx6",
+        "xx7", "xx8", "xx9", "xx10", "atomic_number", "xx11", "ionised")
+    return np.core.records.fromrecords([transition], names=columns, formats=None)
+    
 
 def read_line_list(filename, mode=None, ignore_blanks=True):
     """
