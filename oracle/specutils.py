@@ -162,7 +162,6 @@ class Spectrum1D(object):
                 if "LTV1" in header.keys():
                     disp -= header["LTV1"] * header["CDELT1"]
 
-                #disp -= header["LTV1"] if header.has_key("LTV1") else 0
                 flux = image[0].data
             
                 # Check for logarithmic dispersion
