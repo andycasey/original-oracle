@@ -2818,12 +2818,13 @@ c
 c -------------------------- compute EW's --------------------------
 c trapezoidal integration
 c MB 15.08.14, excitation potential print
+c ARC 18.09.14 explicitly describe equivalent width
 
       print*, '', flux_out(1),flux_out(wlam_cnt)
       ewidth = EW(0,wlam_out,flux_out,
      *            wlam_cnt,wlam_out(1),wlam_out(wlam_cnt))
       ewidth = 1000.*ewidth                 ! in mA
-         WRITE(CHN,*), ewidth
+         WRITE(CHN,*), 'equivalent width: ', ewidth
          WRITE(CHN,*), 'excitation potential: ', EXCPOT
 c --------
 
