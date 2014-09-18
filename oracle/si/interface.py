@@ -594,21 +594,8 @@ def equivalent_width(teff, logg, metallicity, xi, transition,
     return equivalent_widths[0] if single_call else np.array(equivalent_widths)
 
 
-@utils.rounder(0, 3, 3, 3, 2, 2)
-@utils.lru_cache(maxsize=128, typed=False)
-def synthesise_single(teff, logg, metallicity, xi, wavelength_start,
-    wavelength_stop, abundances=(('Fe', 7.5), ('Ti', 3.2))):
-    """
-    Test function
-    """
-
-    print("actually synthesising")
-    with instance() as si:
-        data = si.synthesise(teff, logg, metallicity, xi, [wavelength_start, wavelength_stop])
-
-    return data
-
-
+#@utils.rounder(0, 3, 3, 3, 2, 2)
+#@utils.lru_cache(maxsize=128, typed=False)
 def synthesise_transition(teff, logg, metallicity, xi, transition, surrounding=2,
     wavelength_steps=(0.10, 0.005, 1.5), abundances=None, full_output=False):
     """
@@ -669,6 +656,10 @@ def synthesise_transition(teff, logg, metallicity, xi, transition, surrounding=2
 
     :type full_output:
         bool
+
+    :returns:
+        A synthesised spectrum of the present line. If ``full_output`` is True,
+        then the spectrum, equivalent width, and SI standard output is returned.
     """
 
     with instance() as si:
@@ -686,8 +677,12 @@ def synthesise_transition(teff, logg, metallicity, xi, transition, surrounding=2
         spectrum, stdout = si.synthesise(teff, logg, metallicity, xi, region,
             wavelength_steps, abundances, full_output=True)
 
+        # Parse the equivalent width from the SI standard output
+        index = stdout.split("\n").index(" Lineformation")
+        equivalent_width = float(stdout[index + 3])
+
     if full_output:
-        return (spectrum, stdout)
+        return (spectrum, equivalent_width, stdout)
     return spectrum
 
 
