@@ -12,6 +12,7 @@ import numpy as np
 import os
 import re
 import shutil
+import scipy.optimize as op
 from random import choice
 from signal import alarm, signal, SIGALRM, SIGKILL
 from string import ascii_letters
@@ -31,7 +32,8 @@ class instance(object):
     _executable = "si_lineform"
     _acceptable_return_codes = (0, )
 
-    def __init__(self, twd_base_dir="/tmp", prefix="si", chars=10, debug=False):
+    def __init__(self, twd_base_dir="/tmp", prefix="si", chars=10, debug=False,
+        **kwargs):
         """
         A context manager for interfacing with SI.
 
@@ -67,6 +69,10 @@ class instance(object):
         if not os.path.exists(self.twd_base_dir):
             os.mkdir(self.twd_base_dir)
 
+        # Dragons ahead.
+        if "transition" in kwargs:
+            self._transition = kwargs["transition"]
+
 
     def __enter__(self):
         # Create a temporary working directory.
@@ -79,9 +85,13 @@ class instance(object):
         logging.debug("Temporary working directory: {0}".format(self.twd))
 
         # Link the line list.
-        siu_line_list = os.path.abspath(os.path.join(os.path.dirname(
-            os.path.expanduser(__file__)),  "linedata/master_line.dat")) 
-        os.symlink(siu_line_list, os.path.join(self.twd, "linedata.dat"))
+        if hasattr(self, "_transition"):
+            io.write_line_list(os.path.join(self.twd, "linedata.dat"),
+                np.array([self._transition]), mode="b")
+        else:
+            siu_line_list = os.path.abspath(os.path.join(os.path.dirname(
+                os.path.expanduser(__file__)),  "linedata/master_line.dat")) 
+            os.symlink(siu_line_list, os.path.join(self.twd, "linedata.dat"))
 
         return self
 
@@ -318,6 +328,116 @@ class instance(object):
         if full_output:
             return (equivalent_width, synthetic_spectra, stdout)
         return equivalent_width
+
+
+    @utils.rounder(None, 0, 3, 3, 3, 3, 2)
+    @utils.lru_cache(maxsize=128, typed=False)
+    def synthesise_transition(self, teff, logg, metallicity, xi, abundance,
+        surrounding=2, wavelength_steps=(0.10, 0.005, 1.5), full_output=False):
+        """
+        Synthesise spectrum surrounding a single transition for a given effective
+        temperature, surface gravity, abundances and microturbulence. Note that
+        this function within the instance assumes that the line list has already
+        been set up for the instance.
+
+        :param teff:
+            Effective temperature of the model atmosphere (Kelvin).
+
+        :type teff:
+            float
+
+        :param logg:
+            Surface gravity of the model atmosphere.
+
+        :type logg:
+            float
+
+        :param metallicity:
+            Mean metallicity of the model atmosphere.
+
+        :type metallicity:
+            float
+
+        :param xi:
+            Microturbulence in the model atmosphere (km/s).
+
+        :type xi:
+            float
+
+        :param abundance:
+            The abundance for the transition.
+
+        :type abundance:
+            float
+
+        :param surrounding:
+            The amount of spectrum to synthesise surrounding the line (either side).
+
+        :type surrounding:
+            float
+
+        :param wavelength_steps: [optional]
+            The optimal, minimum and maximum wavelength step to synthesise
+            (Angstroms).
+
+        :type wavelength_step_limits:
+            tuple
+
+        :param full_output: [optional]
+            Return the SI output as well as the synthesised spectra.
+
+        :type full_output:
+            bool
+
+        :returns:
+            A synthesised spectrum of the present line. If ``full_output`` is True,
+            then the spectrum, equivalent width, and SI standard output is returned.
+        """
+
+        try:
+            # transition information should be in this instance.
+            assert self._transition, "No transition information in instance. "\
+                "Do you know what you're doing?"
+        except:
+            None
+
+        transition = self._transition
+
+        region = (
+            transition["wavelength"] - surrounding,
+            transition["wavelength"] + surrounding
+        )
+        # Synthesise
+        spectrum, stdout = self.synthesise(teff, logg, metallicity, xi, region,
+            wavelength_steps, 
+            abundances={utils.element(transition["atomic_number"]): abundance},
+            full_output=True)
+
+        # Parse the equivalent width from the SI standard output
+        stdout_split = stdout.split("\n")
+
+        if " No line center within interval" in stdout:
+            logging.warn("No line center synthesised for transition at {0:.2f} A"\
+                " with [{1}/H] = {2:.2f}. Line is either too weak or not in the "\
+                "provided line list.".format(transition["wavelength"], 
+                    utils.element(transition["atomic_number"]), abundance))
+
+        # Let's go backwards, it will be faster:
+        for line in stdout_split[::-1]:
+            if line.startswith(" equivalent width: "):
+                equivalent_width = float(line.strip().split()[2])
+
+                if not np.isfinite(equivalent_width):
+                    equivalent_width = 0
+                break
+        
+        else:
+            raise ValueError("No equivalent width found for transition at"\
+                " {0:.2f} Angstroms".format(transition["wavelength"]))
+
+        if full_output:
+            return (spectrum, equivalent_width, stdout)
+        return spectrum
 
 
     def synthesise(self, teff, logg, metallicity, xi, wavelengths,
@@ -655,49 +775,49 @@ def synthesise_transition(teff, logg, metallicity, xi, transition, abundance,
         then the spectrum, equivalent width, and SI standard output is returned.
     """
 
-    with instance() as si:
+    if isinstance(transition, tuple):
+        # Put to record array.
+        line_list_data = io._tuple_to_recarray(transition)
+        transition = line_list_data[0]
 
-        # Overwrite line list
-        line_list_filename = os.path.join(si.twd, "linedata.dat")
-        os.remove(line_list_filename)
-
-        if isinstance(transition, tuple):
-            # Put to record array.
-            line_list_data = io._tuple_to_recarray(transition)
-            transition = line_list_data[0]
-
-        else:
-            # It's a single record, but the write_line_list expects many.
-            line_list_data = np.array([transition])
-
-        io.write_line_list(line_list_filename, line_list_data, mode="b")
-
-        region = (
-            transition["wavelength"] - surrounding,
-            transition["wavelength"] + surrounding
-        )
-        # Synthesise
-        spectrum, stdout = si.synthesise(teff, logg, metallicity, xi, region,
-            wavelength_steps, 
-            abundances={utils.element(transition["atomic_number"]): abundance},
+    with instance(transition=transition) as si:
+        spectrum, equivalent_width, stdout = si.synthesise_transition(
+            teff, logg, metallicity, xi, abundance, surrounding, wavelength_steps,
             full_output=True)
-
-        # Parse the equivalent width from the SI standard output
-        stdout_split = stdout.split("\n")
-
-        # Let's go backwards, it will be faster:
-        for line in stdout_split[::-1]:
-            if line.startswith(" equivalent width: "):
-                equivalent_width = float(line.strip().split()[2])
-                break
-        
-        else:
-            raise ValueError("No equivalent width found for transition at"\
-                " {0:.2f} Angstroms".format(transition["wavelength"]))
 
     if full_output:
         return (spectrum, equivalent_width, stdout)
     return spectrum
+
+
+def abfind(teff, logg, metallicity, xi, transition, equivalent_width,
+    tolerance=0.01, full_output=False, **kwargs):
+    """
+    Find an abundance for a given transition and equivalent width.
+
+    """
+
+    if full_output in kwargs:
+        kwargs.pop(full_output)
+
+    with instance(transition=transition) as si:
+
+        @utils.rounder(2)
+        @utils.lru_cache(maxsize=128, typed=False)
+        def _abfind(x, fo=False):
+            spectrum, measured_eqw, stdout = si.synthesise_transition(teff, 
+                logg, metallicity, xi, x[0], full_output=True, **kwargs)
+            measured_eqw = np.clip(measured_eqw, 0, np.inf)
+            chi_sq = (equivalent_width - measured_eqw)**2
+
+            if fo:
+                return (chi_sq, spectrum, measured_eqw, stdout)
+            return chi_sq
+
+        xopt, fopt, direc, niter, nfunc, warnflag = op.fmin_powell(_abfind,
+            metallicity, xtol=tolerance, ftol=tolerance, disp=False, full_output=True)
+
+    return xopt
 
 
 def synthesise(teff, logg, metallicity, xi, wavelengths, wavelength_steps=(0.10,

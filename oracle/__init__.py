@@ -9,5 +9,5 @@ __version__ = "0.01"
 
 import logging
 
-logging.basicConfig(level=logging.WARN, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("oracle")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

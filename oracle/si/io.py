@@ -155,6 +155,12 @@ def _pack_binary_structure(data, num=200):
 
     assert num >= len(data)
 
+    columns = ["wavelength", "excitation_potential", "J_low", "J_up", "xx1",
+        "log(gf)", "xx2", "log(c4)?", "log(c6)", "xx3", "xx4", "xx5", "xx6",
+        "xx7", "xx8", "xx9", "xx10", "atomic_number", "xx11", "ionised"]
+
+    data = data[columns]
+
     if num > len(data):
         # We will need to copy the data and pad it.
         data = data.copy()

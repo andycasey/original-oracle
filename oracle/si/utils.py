@@ -191,12 +191,16 @@ def rounder(*decimals, **decimal_kwargs):
             rounded_args = []
             for arg, decimal in zip(args, decimals):
                 if decimal is None:
-                    rounded_args.append(arg)
+                    if isinstance(arg, (np.core.records.record, )):
+                        rounded_args.append(tuple(arg))
+                    else:
+                        rounded_args.append(arg)
                 else:
                     if isinstance(arg, (float, int)):
                         rounded_args.append(np.round(arg, decimal))
                     else:
                         rounded_args.append(tuple(np.round(arg, decimal)))
+
 
             # Extend with arguments that don't have precision requirements
             missing_args = len(args) - len(rounded_args)
