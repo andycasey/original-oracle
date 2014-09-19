@@ -312,4 +312,10 @@ filenames = glob("../tests/data/benchmarks/18Sco/18Sco_narval*noresample*")
 data = map(theremin.specutils.Spectrum1D.load, filenames)
 data.sort(key=lambda s: s.disp[0])
 
-model = theremin.SpectrumModel(config, data)
+model = theremin.ThereminModel(config)
+spectrum_model = theremin.SpectrumModel(config, data)
+
+#result = model.optimise(data, plot_transitions=True)
+
+
+

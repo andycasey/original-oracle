@@ -44,7 +44,7 @@ def fit(x, y, y_uncertainty=None, outliers=True, full_output=False):
     A = np.vstack((np.ones_like(x), x)).T
     C = np.diag(y_uncertainty * y_uncertainty)
     cov = np.linalg.inv(np.dot(A.T, np.linalg.solve(C, A)))
-    b, m = np.dot(cov, np.dot(A.T, np.linalg.solve(C, y)))
+    offset, slope = np.dot(cov, np.dot(A.T, np.linalg.solve(C, y)))
 
     # Should we be modelling outliers?
     if outliers:
