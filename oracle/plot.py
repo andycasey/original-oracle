@@ -5,18 +5,137 @@
 __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 
 import logging
-
 import matplotlib.pyplot as plt
 
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import MaxNLocator, LinearLocator
 import numpy as np
 from scipy import stats
 
 import acor
-import specutils
-from models import line
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("oracle")
+
+
+def transition(data, model, synthetic_spectra, wavelength, data_color="#000000",
+    model_color=u"#4682b4",title=None):
+    """
+    Plot a transition that has been fit by the ThereminSolver (and maybe by others
+    in the future).
+
+    :param data:
+        The observed spectrum.
+
+    :type data:
+        :class:`oracle.specutils.Spectrum1D` 
+
+    """
+
+    fig, ax = plt.subplots()
+
+    mask = model.mask(data.disp, 0.)
+
+    # Just plot surrounding region.
+    indices = data.disp.searchsorted([wavelength - 2, wavelength + 2])
+    disp, flux = data.disp.__getslice__(*indices), data.flux.__getslice__(*indices)
+    mask = model.mask(disp, 0.) # TODO
+    ax.plot(disp, flux, "-.", c=data_color)
+    ax.plot(disp, flux * mask, "-", c=data_color)
+
+    # Plot synthetic spectra
+    ax.plot(synthetic_spectra[:, 0], synthetic_spectra[:, 1], c=model_color)
+    ax.plot(synthetic_spectra[:, 0], synthetic_spectra[:, 2], "-.", c=model_color)
+
+    ax.axvline(wavelength, linestyle="-", c="#666666", zorder=-1)
+
+    if title is not None:
+        ax.set_title(title)
+
+    ax.set_xlim(wavelength - 1, wavelength + 1)
+    
+    ax.xaxis.set_major_locator(LinearLocator(5))
+    xticks = np.arange(wavelength - 1.5, wavelength + 1.5, 0.5)
+    ax.set_xticklabels(["{0:.2f}".format(each) for each in xticks])
+
+    ax.set_xlabel("Wavelength [$\AA$]")
+    ax.set_ylabel("Flux")
+
+    return fig
+
+
+def _transition(data, model_spectra, transition, title=None):
+
+
+    import matplotlib.pyplot as plt
+
+    if free_broadening:
+        fig, ax = plt.subplots()
+        ax.scatter(wavelengths, [each[0][1] for each in line_results])
+        ax.set_xlabel("wavelength")
+        ax.set_ylabel("resolution")
+        fig.savefig("resolutions.png")
+
+    transition_indices = np.array(sum([self._transition_mapping[i] for i in xrange(len(self.data))], []))
+
+    fig, axes = plt.subplots(2)
+    ordered_transitions = self.atomic_lines[transition_indices]
+    wavelengths = np.array(wavelengths)
+    abundances = np.array([each[0][0] for each in line_results])
+    chi_sqs = np.array([each[1] for each in line_results])
+    equivalent_widths = np.array([each[2] for each in line_results])
+
+    ok = (equivalent_widths > 0)
+
+    scat = axes[0].scatter(ordered_transitions["excitation_potential"][ok], abundances[ok], c=chi_sqs[ok], cmap='YlOrRd')
+    scat2 = axes[1].scatter(np.log(equivalent_widths/wavelengths)[ok], abundances[ok], c=chi_sqs[ok], cmap='YlOrRd')
+    cbar = plt.colorbar(scat, cmap='YlOrRd')
+    cbar.set_label("$\chi^2$")
+    fig.savefig("excitation.png")
+
+
+    fig, axes = plt.subplots(len(self.data))
+    for i, (ax, observed, initial, optimal) \
+    in enumerate(zip(axes, self.data, initial_fluxes, optimal_fluxes)):
+        ax.plot(observed.disp, observed.flux, 'k')
+        ax.plot(observed.disp, initial, 'r', label='initial')
+        ax.plot(observed.disp, optimal, 'g', label='final')
+        #ax.plot(observed.disp, final, 'b', label='real final')
+        #ax.plot(blended[:, 0], blended[:,1], c="#666666", label='blended')
+
+        #[ax.plot(each[:,0], each[:,1], 'g') for each in opt_spectra[i]]
+        ax.set_xlim(observed.disp[0], observed.disp[-1])
+
+    ax.legend()
+    for i, transition in enumerate(self.atomic_lines):
+        if i not in sum(self._transition_mapping.values(), []): continue
+        
+        # Which thing are we in?
+        for j, indices in self._transition_mapping.iteritems():
+            if i in indices: break
+
+        axes[j].axvline(transition["wavelength"], 0, 1.2, c="b")
+
+
+
+    """
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots()
+    ax.plot(disp, flux, "-.", c="k")
+    ax.plot(disp,flux * self.mask(disp, z, use_cached=False), 'k')
+    chi, r_chi, eqw, bar = chi_sq(xopt, True)
+    ax.set_title("$\chi^2 = {0:.2f}$".format(r_chi))
+    ax.plot(disp, bar[:,1], 'b')
+    ax.plot(disp,bar[:,2], ":", c="b")
+    ax.set_xlim(wavelength_region)
+    ax.axvline(wavelength, c="g")
+    fig.savefig("fit-{0:.2f}.png".format(transition["wavelength"]))
+    #if wavelength > 4732:
+    #    raise a
+    plt.close("all")
+    """
+
+    None
+
+
 
 def acceptance_fractions(mean_acceptance_fractions, burn=None, **kwargs):
     """
@@ -523,12 +642,12 @@ def balance(atomic_data_table, title=None):
     fig, axes = plt.subplots(2)
     excitation_ax, line_strength_ax = axes
 
-    if len(set(atomic_data_table["species"].astype(int))) > 1:
+    if len(set(atomic_data_table["atomic_number"].astype(int))) > 1:
         logger.warn("Multiple elements found in atomic data table. These will "\
             "all be plotted as the same symbol for the moment.")
 
     # Seperate neutral and ionised species.
-    neutral = (atomic_data_table["species"] % 1) == 0
+    neutral = (atomic_data_table["ionised"] == 1)
     ionised = ~neutral
 
     # Plot the excitation potential axes
@@ -551,15 +670,27 @@ def balance(atomic_data_table, title=None):
         atomic_data_table["abundance"][ionised], facecolor="b", zorder=10)
 
     # Measure slopes by linear regression [TODO] and show them
-    y_uncertainty = np.nanmax(np.abs(np.vstack([
-        atomic_data_table["u_pos_abundance"], atomic_data_table["u_neg_abundance"]])), axis=0)
-    assert len(y_uncertainty) == len(atomic_data_table)
+    if uncertainties:
+        y_uncertainty = np.nanmax(np.abs(np.vstack([
+            atomic_data_table["u_pos_abundance"], atomic_data_table["u_neg_abundance"]])), axis=0)
+        assert len(y_uncertainty) == len(atomic_data_table)
 
-    m, b = line.fit(
-        x=atomic_data_table["excitation_potential"][neutral],
-        y=atomic_data_table["abundance"][neutral],
-        y_uncertainty=y_uncertainty[neutral], full_output=True)[:2]
+        m, b = 0, 1
+        """
+        m, b = line.fit(
+            x=atomic_data_table["excitation_potential"][neutral],
+            y=atomic_data_table["abundance"][neutral],
+            y_uncertainty=y_uncertainty[neutral], full_output=True)[:2]
+        """
 
+    else:
+        m, b = 0, 1
+
+        """
+        m, b = line.fit(
+            x=atomic_data_table["excitation_potential"][neutral],
+            y=atomic_data_table["abundance"][neutral], full_output=True)[:2]
+        """
     x_limits = np.array(excitation_ax.get_xlim())
     y_limits = excitation_ax.get_ylim()
     excitation_ax.plot(x_limits, [np.mean(atomic_data_table["abundance"])] * 2, c="#666666")
@@ -590,6 +721,22 @@ def balance(atomic_data_table, title=None):
             yerr=(np.abs(atomic_data_table["u_neg_abundance"]), atomic_data_table["u_pos_abundance"]),
             fmt=None, ecolor="k")
 
+        m, b = 0, 1
+        """
+        m, b = line.fit(
+            x=reduced_equivalent_width[neutral],
+            y=atomic_data_table["abundance"][neutral],
+            y_uncertainty=y_uncertainty[neutral], full_output=True)[:2]
+        """
+
+    else:
+        m, b = 0, 1
+        """
+        m, b = line.fit(
+            x=reduced_equivalent_width[neutral],
+            y=atomic_data_table["abundance"][neutral], full_output=True)[:2]
+        """
+
     line_strength_ax.scatter(
         reduced_equivalent_width[neutral], atomic_data_table["abundance"][neutral],
         facecolor="k", zorder=10)
@@ -598,10 +745,6 @@ def balance(atomic_data_table, title=None):
         facecolor="b", zorder=10)
 
     # Measure slopes by linear regression [TODO] and show them
-    m, b = line.fit(
-        x=reduced_equivalent_width[neutral],
-        y=atomic_data_table["abundance"][neutral],
-        y_uncertainty=y_uncertainty[neutral], full_output=True)[:2]
 
     logger.info("Slope on the reduced equivalent width plot: {0:.4f}".format(m))
     x_limits = np.array(line_strength_ax.get_xlim())
