@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+from glob import glob
 
 try:
     from setuptools import setup
@@ -43,11 +44,25 @@ if "install" in sys.argv:
                 "ser-xe-evaluation-options")
 
         # Install SI
-        print("Installing SI..")
+        print("Removing any old instances of SI..")
         cwd = os.path.join(os.path.dirname(os.path.abspath(
-            os.path.expanduser(__file__))), "si/code")
+            os.path.expanduser(__file__))), "oracle/si/code")
+
+        try:
+            os.remove(os.path.join(cwd, "../si_lineform"))
+            map(os.remove, glob(os.path.join(cwd, "*.o")))
+
+        except OSError:
+            None
+
+        print("Installing SI..")
         installer = subprocess.call("make", cwd=cwd, shell=True,
             env=os.environ.copy())
+
+        # Clean up either way.
+        print("Cleaning up..")
+        cleaner = map(os.remove, glob(os.path.join(cwd, "*.o")))
+        
         if installer != 0:
             raise Exception("SI fortran code could not be compiled")
 
@@ -59,7 +74,7 @@ setup(name="oracle",
     version=version,
     author="Andrew R. Casey",
     author_email="arc@ast.cam.ac.uk",
-    packages=["oracle"],
+    packages=["oracle", "oracle.si", "oracle.models"],
     url="http://www.github.com/andycasey/oracle/",
     license="MIT",
     description="the suppository of all wisdom",
@@ -69,7 +84,7 @@ setup(name="oracle",
     entry_points={
         "console_scripts": ["oracle = oracle.cli:main"]
     },
-    scripts=["si/si_lineform"],
+    scripts=["oracle/si/si_lineform"],
     include_package_data=True,
-    package_data={'': ['*.dat']}
+    #package_data={"": [""]}
 )

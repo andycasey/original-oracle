@@ -14,7 +14,7 @@ from threading import RLock
 import numpy as np
 from scipy.special import wofz
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("oracle")
 
 _CacheInfo = namedtuple("CacheInfo", ["hits", "misses", "maxsize", "currsize"])
 
@@ -128,6 +128,7 @@ def lru_cache(maxsize=128, typed=False):
                         link[PREV] = last
                         link[NEXT] = root
                         stats[HITS] += 1
+                        logger.debug("Using cache")
                         return result
                 result = user_function(*args, **kwds)
                 with lock:
@@ -177,7 +178,34 @@ def lru_cache(maxsize=128, typed=False):
         wrapper.cache_clear = cache_clear
         return update_wrapper(wrapper, user_function)
 
-    return decorating_functio
+    return decorating_function
+
+
+def rounder(*decimals, **decimal_kwargs):
+    def decorator(function):
+        def wrapper(*args, **kwargs):
+            
+            rounded_args = []
+            for arg, decimal in zip(args, decimals):
+                if decimal is None:
+                    if isinstance(arg, (np.core.records.record, )):
+                        rounded_args.append(tuple(arg))
+                    else:
+                        rounded_args.append(arg)
+                else:
+                    if isinstance(arg, (float, int)):
+                        rounded_args.append(np.round(arg, decimal))
+                    else:
+                        rounded_args.append(tuple(np.round(arg, decimal)))
+
+
+            # Extend with arguments that don't have precision requirements
+            missing_args = len(args) - len(rounded_args)
+            if missing_args > 0:
+                rounded_args.extend(args[-missing_args:])
+            return function(*rounded_args, **kwargs)
+        return wrapper
+    return decorator
 
 
 def stellar_jacobian(stellar_parameters, *args):

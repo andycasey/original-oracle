@@ -5,16 +5,137 @@
 __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 
 import logging
-
 import matplotlib.pyplot as plt
 
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import MaxNLocator, LinearLocator
 import numpy as np
 from scipy import stats
 
-import specutils
+import acor
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("oracle")
+
+
+def transition(data, model, synthetic_spectra, wavelength, data_color="#000000",
+    model_color=u"#4682b4",title=None):
+    """
+    Plot a transition that has been fit by the ThereminSolver (and maybe by others
+    in the future).
+
+    :param data:
+        The observed spectrum.
+
+    :type data:
+        :class:`oracle.specutils.Spectrum1D` 
+
+    """
+
+    fig, ax = plt.subplots()
+
+    mask = model.mask(data.disp, 0.)
+
+    # Just plot surrounding region.
+    indices = data.disp.searchsorted([wavelength - 2, wavelength + 2])
+    disp, flux = data.disp.__getslice__(*indices), data.flux.__getslice__(*indices)
+    mask = model.mask(disp, 0.) # TODO
+    ax.plot(disp, flux, "-.", c=data_color)
+    ax.plot(disp, flux * mask, "-", c=data_color)
+
+    # Plot synthetic spectra
+    ax.plot(synthetic_spectra[:, 0], synthetic_spectra[:, 1], c=model_color)
+    ax.plot(synthetic_spectra[:, 0], synthetic_spectra[:, 2], "-.", c=model_color)
+
+    ax.axvline(wavelength, linestyle="-", c="#666666", zorder=-1)
+
+    if title is not None:
+        ax.set_title(title)
+
+    ax.set_xlim(wavelength - 1, wavelength + 1)
+    
+    ax.xaxis.set_major_locator(LinearLocator(5))
+    xticks = np.arange(wavelength - 1.5, wavelength + 1.5, 0.5)
+    ax.set_xticklabels(["{0:.2f}".format(each) for each in xticks])
+
+    ax.set_xlabel("Wavelength [$\AA$]")
+    ax.set_ylabel("Flux")
+
+    return fig
+
+
+def _transition(data, model_spectra, transition, title=None):
+
+
+    import matplotlib.pyplot as plt
+
+    if free_broadening:
+        fig, ax = plt.subplots()
+        ax.scatter(wavelengths, [each[0][1] for each in line_results])
+        ax.set_xlabel("wavelength")
+        ax.set_ylabel("resolution")
+        fig.savefig("resolutions.png")
+
+    transition_indices = np.array(sum([self._transition_mapping[i] for i in xrange(len(self.data))], []))
+
+    fig, axes = plt.subplots(2)
+    ordered_transitions = self.atomic_lines[transition_indices]
+    wavelengths = np.array(wavelengths)
+    abundances = np.array([each[0][0] for each in line_results])
+    chi_sqs = np.array([each[1] for each in line_results])
+    equivalent_widths = np.array([each[2] for each in line_results])
+
+    ok = (equivalent_widths > 0)
+
+    scat = axes[0].scatter(ordered_transitions["excitation_potential"][ok], abundances[ok], c=chi_sqs[ok], cmap='YlOrRd')
+    scat2 = axes[1].scatter(np.log(equivalent_widths/wavelengths)[ok], abundances[ok], c=chi_sqs[ok], cmap='YlOrRd')
+    cbar = plt.colorbar(scat, cmap='YlOrRd')
+    cbar.set_label("$\chi^2$")
+    fig.savefig("excitation.png")
+
+
+    fig, axes = plt.subplots(len(self.data))
+    for i, (ax, observed, initial, optimal) \
+    in enumerate(zip(axes, self.data, initial_fluxes, optimal_fluxes)):
+        ax.plot(observed.disp, observed.flux, 'k')
+        ax.plot(observed.disp, initial, 'r', label='initial')
+        ax.plot(observed.disp, optimal, 'g', label='final')
+        #ax.plot(observed.disp, final, 'b', label='real final')
+        #ax.plot(blended[:, 0], blended[:,1], c="#666666", label='blended')
+
+        #[ax.plot(each[:,0], each[:,1], 'g') for each in opt_spectra[i]]
+        ax.set_xlim(observed.disp[0], observed.disp[-1])
+
+    ax.legend()
+    for i, transition in enumerate(self.atomic_lines):
+        if i not in sum(self._transition_mapping.values(), []): continue
+        
+        # Which thing are we in?
+        for j, indices in self._transition_mapping.iteritems():
+            if i in indices: break
+
+        axes[j].axvline(transition["wavelength"], 0, 1.2, c="b")
+
+
+
+    """
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots()
+    ax.plot(disp, flux, "-.", c="k")
+    ax.plot(disp,flux * self.mask(disp, z, use_cached=False), 'k')
+    chi, r_chi, eqw, bar = chi_sq(xopt, True)
+    ax.set_title("$\chi^2 = {0:.2f}$".format(r_chi))
+    ax.plot(disp, bar[:,1], 'b')
+    ax.plot(disp,bar[:,2], ":", c="b")
+    ax.set_xlim(wavelength_region)
+    ax.axvline(wavelength, c="g")
+    fig.savefig("fit-{0:.2f}.png".format(transition["wavelength"]))
+    #if wavelength > 4732:
+    #    raise a
+    plt.close("all")
+    """
+
+    None
+
+
 
 def acceptance_fractions(mean_acceptance_fractions, burn=None, **kwargs):
     """
@@ -55,8 +176,7 @@ def acceptance_fractions(mean_acceptance_fractions, burn=None, **kwargs):
 
 
 def spectrum_comparison(data, model, theta=None, model_spectra=None, figsize=None,
-    plot_uncertainties=False, observed_color=u"k", model_color=u"b", mask_color=u"r",
-    mask_alpha=0.5):
+    observed_color=u"k", model_color=u"#4682b4", mask_color=u"r", mask_alpha=0.1):
     """
     Produce a comparison plot showing the observed and model spectra.
 
@@ -92,12 +212,6 @@ def spectrum_comparison(data, model, theta=None, model_spectra=None, figsize=Non
 
     :type figsize:
         tuple
-
-    :param plot_uncertainties: [optional]
-        Show the uncertainties in the observed data.
-
-    :type plot_uncertainties:
-        bool
 
     [TODO]: other docs
 
@@ -142,11 +256,12 @@ def spectrum_comparison(data, model, theta=None, model_spectra=None, figsize=Non
         # Plot the spectra
         if model_spectrum is not None:
             ax.plot(model_spectrum[:, 0], model_spectrum[:, 1], model_color)
-        if plot_uncertainties:
-            ax.errorbar(observed_spectrum.disp, observed_spectrum.flux,
-                yerr=observed_spectrum.variance**0.5, fmt=None, ecolor=observed_color)
+
+        ax.fill_between(observed_spectrum.disp, 
+            observed_spectrum.flux - observed_spectrum.variance**0.5,
+            observed_spectrum.flux + observed_spectrum.variance**0.5,
+            facecolor="#eeeeee", edgecolor="#666666", zorder=-1)
         ax.plot(observed_spectrum.disp, observed_spectrum.flux, observed_color)
-        
         
         # Show the mask
         obs_start, obs_end = observed_spectrum.disp[0], observed_spectrum.disp[-1]
@@ -165,7 +280,7 @@ def spectrum_comparison(data, model, theta=None, model_spectra=None, figsize=Non
 
 
 def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None,
-    plot_uncertainties=False):
+    mask_color="r", mask_alpha=0.1):
     """
     Project the maximum likelihood values and sampled posterior points as spectra.
 
@@ -206,12 +321,6 @@ def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None
     :type figsize:
         tuple or None
 
-    :param plot_uncertainties: [optional]
-        Plot uncertainties in the data.
-
-    :type plot_uncertainties:
-        bool
-
     :raises ValueError:
         If a ``fig`` is provided with the incorrect number of axes.
 
@@ -235,7 +344,7 @@ def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None
     lbdim = 0.5 * factor
     trdim = 0.2 * factor
     whspace = 0.10
-    width = 8.
+    width = max([len(each.disp) for each in data])/150.
     height = factor*K + factor * (K - 1.) * whspace
     dimy = lbdim + height + trdim
     dimx = lbdim + width + trdim
@@ -268,12 +377,12 @@ def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None
                 model.parameters,
                 sampler.flatchain[np.random.randint(0, n_samples)]
             ))
-
             try:
                 sampler_flux = [model(dispersion=[s.disp for s in data],
                     **sampled_theta)[:,1]]
             except:
                 continue
+
             else:
                 sampled_fluxes.append(sampler_flux)
     
@@ -285,17 +394,29 @@ def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None
         # Draw the random samples from the chain
         if n > 0:
             for sampled_flux in sampled_fluxes:
-                ax.plot(observed_spectrum.disp, sampled_flux[k], color="#666666")
+                ax.plot(observed_spectrum.disp, sampled_flux[k], color=u"#4682b4", alpha=0.1)
 
         # Draw the ML spectra
-        ax.plot(observed_spectrum.disp, max_lnprob_flux, color="r", lw=2)
+        ax.plot(observed_spectrum.disp, max_lnprob_flux, color=u"#4682b4", lw=2)
 
         # Plot the data
         ax.plot(observed_spectrum.disp, observed_spectrum.flux, color="k")
 
-        if plot_uncertainties:
-            ax.errorbar(observed_spectrum.disp, observed_spectrum.flux,
-                yerr=observed_spectrum.variance**0.5, fmt=None, ecolor="k")
+        ax.fill_between(observed_spectrum.disp,
+            observed_spectrum.flux - observed_spectrum.variance**0.5,
+            observed_spectrum.flux + observed_spectrum.variance**0.5, 
+            facecolor='#eeeeee', edgecolor="#666666", zorder=-1)
+        
+        # Show the mask
+        mask = np.array(model.config.get("mask", []))
+        obs_start, obs_end = observed_spectrum.disp[0], observed_spectrum.disp[-1]
+        for start, end in mask:
+            if obs_end >= start and start >= obs_start \
+            or obs_end >= end and end >= obs_start:
+                # Show the mask in this axes.
+                ax.axvspan(start, end, facecolor=mask_color, alpha=mask_alpha,
+                    edgecolor='none')
+
 
         # By default only show common overlap between the model and spectral data
         if extents is None:
@@ -330,6 +451,91 @@ def projection(sampler, model, data, n=100, extents=None, fig=None, figsize=None
         ax.xaxis.set_major_locator(MaxNLocator(5))
         ax.yaxis.set_major_locator(MaxNLocator(5))
         [l.set_rotation(45) for l in ax.get_yticklabels()]
+
+    return fig
+
+
+def autocorrelation(xs, burn_in, labels=None, fig=None):
+    """
+    Create a plot showing the autocorrelation in each parameter.
+
+    :param xs:
+        The sampled values. This should be a three dimensional array of size
+        ``(n_walkers, n_steps, n_parameters)``
+
+    :type xs:
+        :class:`numpy.array`
+
+    :param burn_in: [optional]
+        The number of steps used for burn-in.
+
+    :type burn_in:
+        int
+
+    :param labels: [optional]
+        The labels for each parameter.
+
+    :type labels:
+        tuple of str
+
+    :param fig: [optional]
+        Figure class to use for the plotting.
+
+    :type fig:
+        :class:`matplotlib.Figure`
+
+    :returns:
+        A figure showing the autocorrelation in each parameter at every MCMC step.
+
+    :rtype:
+        :class:`matplotlib.Figure`
+    """
+
+    n_walkers, n_steps, K = xs.shape
+
+    factor = 2.0
+    lbdim = 0.5 * factor
+    trdim = 0.2 * factor
+    whspace = 0.10
+    width = 15.
+    height = factor*K + factor * (K - 1.) * whspace
+    dimy = lbdim + height + trdim
+    dimx = lbdim + width + trdim
+
+    if fig is None:
+        fig, axes = plt.subplots(K, 1, figsize=(dimx, dimy))
+
+    else:
+        try:
+            axes = np.array(fig.axes).reshape((1, K))
+        except:
+            raise ValueError("Provided figure has {0} axes, but data has "
+                "parameters K={1}".format(len(fig.axes), K))
+
+    lm = lbdim / dimx
+    bm = lbdim / dimy
+    trm = (lbdim + height) / dimy
+    fig.subplots_adjust(left=lm, bottom=bm, right=trm, top=trm,
+        wspace=whspace, hspace=whspace)
+
+    for k, ax in enumerate(axes):
+
+        ax.plot(acor.function(np.mean(xs[:, burn_in:, k], axis=0)), color="k")
+
+        if burn_in is not None:
+            ax.axvline(burn_in, color="k", linestyle=":")
+
+        ax.set_xlim(0, n_steps)
+        if k < K - 1:
+            ax.set_xticklabels([])
+        else:
+            ax.set_xlabel("Step")
+
+        ax.yaxis.set_major_locator(MaxNLocator(4))
+        [l.set_rotation(45) for l in ax.get_yticklabels()]
+        if labels is not None:
+            ax.set_ylabel(labels[k])
+            ax.yaxis.set_label_coords(-0.05, 0.5)
 
     return fig
 
@@ -436,25 +642,55 @@ def balance(atomic_data_table, title=None):
     fig, axes = plt.subplots(2)
     excitation_ax, line_strength_ax = axes
 
-    if len(set(atomic_data_table["species"].astype(int))) > 1:
+    if len(set(atomic_data_table["atomic_number"].astype(int))) > 1:
         logger.warn("Multiple elements found in atomic data table. These will "\
             "all be plotted as the same symbol for the moment.")
 
     # Seperate neutral and ionised species.
-    neutral = (atomic_data_table["species"] % 1) == 0
+    neutral = (atomic_data_table["ionised"] == 1)
     ionised = ~neutral
 
     # Plot the excitation potential axes
+    try:
+        uncertainties = np.any(np.isfinite(np.vstack([
+            atomic_data_table["u_pos_abundance"], atomic_data_table["u_neg_abundance"]])))
+    except ValueError:
+        uncertainties = False
+
+    if uncertainties:
+        # Plot uncertainties
+        excitation_ax.errorbar(atomic_data_table["excitation_potential"],
+            atomic_data_table["abundance"],
+            yerr=(np.abs(atomic_data_table["u_neg_abundance"]), atomic_data_table["u_pos_abundance"]),
+            fmt=None, ecolor="k")
+
     excitation_ax.scatter(atomic_data_table["excitation_potential"][neutral],
         atomic_data_table["abundance"][neutral], facecolor="k", zorder=10)
     excitation_ax.scatter(atomic_data_table["excitation_potential"][ionised],
         atomic_data_table["abundance"][ionised], facecolor="b", zorder=10)
 
     # Measure slopes by linear regression [TODO] and show them
-    m, b, r_value, p_value, stderr = stats.linregress(
-        x=atomic_data_table["excitation_potential"],
-        y=atomic_data_table["abundance"])
+    if uncertainties:
+        y_uncertainty = np.nanmax(np.abs(np.vstack([
+            atomic_data_table["u_pos_abundance"], atomic_data_table["u_neg_abundance"]])), axis=0)
+        assert len(y_uncertainty) == len(atomic_data_table)
 
+        m, b = 0, 1
+        """
+        m, b = line.fit(
+            x=atomic_data_table["excitation_potential"][neutral],
+            y=atomic_data_table["abundance"][neutral],
+            y_uncertainty=y_uncertainty[neutral], full_output=True)[:2]
+        """
+
+    else:
+        m, b = 0, 1
+
+        """
+        m, b = line.fit(
+            x=atomic_data_table["excitation_potential"][neutral],
+            y=atomic_data_table["abundance"][neutral], full_output=True)[:2]
+        """
     x_limits = np.array(excitation_ax.get_xlim())
     y_limits = excitation_ax.get_ylim()
     excitation_ax.plot(x_limits, [np.mean(atomic_data_table["abundance"])] * 2, c="#666666")
@@ -471,6 +707,36 @@ def balance(atomic_data_table, title=None):
 
     # Plot the line strength axes
     reduced_equivalent_width = np.log(atomic_data_table["equivalent_width"]/atomic_data_table["wavelength"])
+    if uncertainties:
+        x_pos_uncertainties = np.log(
+            (atomic_data_table["equivalent_width"] + atomic_data_table["u_pos_equivalent_width"]) \
+            /atomic_data_table["wavelength"]) - reduced_equivalent_width
+        x_neg_uncertainties = np.abs(np.log(
+            (atomic_data_table["equivalent_width"] + atomic_data_table["u_neg_equivalent_width"]) \
+            /atomic_data_table["wavelength"]) - reduced_equivalent_width)
+
+        line_strength_ax.errorbar(reduced_equivalent_width,
+            atomic_data_table["abundance"],
+            xerr=(x_neg_uncertainties, x_pos_uncertainties),
+            yerr=(np.abs(atomic_data_table["u_neg_abundance"]), atomic_data_table["u_pos_abundance"]),
+            fmt=None, ecolor="k")
+
+        m, b = 0, 1
+        """
+        m, b = line.fit(
+            x=reduced_equivalent_width[neutral],
+            y=atomic_data_table["abundance"][neutral],
+            y_uncertainty=y_uncertainty[neutral], full_output=True)[:2]
+        """
+
+    else:
+        m, b = 0, 1
+        """
+        m, b = line.fit(
+            x=reduced_equivalent_width[neutral],
+            y=atomic_data_table["abundance"][neutral], full_output=True)[:2]
+        """
+
     line_strength_ax.scatter(
         reduced_equivalent_width[neutral], atomic_data_table["abundance"][neutral],
         facecolor="k", zorder=10)
@@ -479,8 +745,6 @@ def balance(atomic_data_table, title=None):
         facecolor="b", zorder=10)
 
     # Measure slopes by linear regression [TODO] and show them
-    m, b, r_value, p_value, stderr = stats.linregress(
-        x=reduced_equivalent_width, y=atomic_data_table["abundance"])
 
     logger.info("Slope on the reduced equivalent width plot: {0:.4f}".format(m))
     x_limits = np.array(line_strength_ax.get_xlim())
