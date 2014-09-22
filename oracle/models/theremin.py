@@ -10,6 +10,7 @@ import collections
 import itertools # why does this make me so happy
 import logging
 import matplotlib.pyplot as plt
+import multiprocessing as mp
 import os
 from time import time
 
@@ -999,11 +1000,34 @@ def approximate_jacobian(model, order=3, limits=None, spacings=None, **kwargs):
     None
 
 
+def _calculate_cog(transition, teff, logg, metallicity, xi, abundances, **kwargs):
+
+    # ensure abundances are sorted high->low
+    kwargs["full_output"] = True
+    assert abundances[0] > abundances[-1]
+    equivalent_widths = np.zeros(len(abundances))
+    with si.instance(transition=transition) as siu:
+        for k, abundance in enumerate(abundances[::-1]):
+            try:
+                spectrum, equivalent_width, stdout = siu.synthesise_transition(
+                    teff, logg, metallicity, xi, abundance, **kwargs)
+
+            except (si.SIException, OSError):
+                raise
+                equivalent_widths[k] = np.nan
+
+            else:
+                equivalent_widths[-k] = equivalent_width
+                if equivalent_width == 0:
+                    # The rest will be too since we go from high->low metallicity
+                    break
+    return equivalent_widths
 
 
 
-def calculate_cog_tables(model, abundances=[-3, -2.5, -2, -1.5, -1, -0.5, 0.0, 0.5], limits=None, spacings=None,
-    **kwargs):
+
+def calculate_cog_tables(model, abundances=[-3, -2.5, -2, -1.5, -1, -0.5, 0.0, 0.5, 1.0],
+    limits=None, spacings=None, threads=1, **kwargs):
     """
     At each permutation of stellar parameters, calculate the abundances for all
     lines given some measured equivalent widths.
@@ -1029,6 +1053,9 @@ def calculate_cog_tables(model, abundances=[-3, -2.5, -2, -1.5, -1, -0.5, 0.0, 0
     if spacings is not None:
         use_spacings.update(spacings)
 
+    # Ensure abundances are sorted high->low
+    abundances = np.sort(abundances)[::-1]
+
     # Create all possible combinations
     points = []
     parameters = ("teff", "logg", "[M/H]", "xi")
@@ -1042,7 +1069,8 @@ def calculate_cog_tables(model, abundances=[-3, -2.5, -2, -1.5, -1, -0.5, 0.0, 0
     stellar_parameter_combinations = list(itertools.product(*points))
 
     # Create an array to store all the equivalent widths
-    n_c, n_ew, n_abund = map(len, [stellar_parameter_combinations, model.atomic_lines, abundances])
+    n_c, n_ew, n_abund = map(len, 
+        [stellar_parameter_combinations, model.atomic_lines, abundances])
     equivalent_widths = np.zeros((n_c, n_ew, n_abund))
 
     for i, stellar_parameters in enumerate(stellar_parameter_combinations):
@@ -1052,19 +1080,25 @@ def calculate_cog_tables(model, abundances=[-3, -2.5, -2, -1.5, -1, -0.5, 0.0, 0
 
         # Calculate the equivalent widths for all transitions at this set of
         # stellar parameters
-        for j, transition in enumerate(model.atomic_lines):
+        if threads > 1:
+            processes = []
+            pool = mp.Pool(threads)
 
-            for k, abundance in enumerate(abundances):
+            for j, transition in enumerate(model.atomic_lines):
+                process = pool.apply_async(_calculate_cog,
+                    args=(transition, teff, logg, metallicity, xi, abundances))
+                processes.append([j, process])
 
-                try:
-                    spectrum, equivalent_width, stdout = si.synthesise_transition(
-                        teff, logg, metallicity, xi, transition, abundance, **kwargs)
+            for j, process in processes:
+                equivalent_widths[i, j, :] = process.get()
 
-                except (si.SIException, OSError):
-                    equivalent_widths[i, j, k] = np.nan
+            pool.close()
+            pool.join()
 
-                else:
-                    equivalent_widths[i, j, k] = equivalent_width
+        else:
+            for j, transition in enumerate(model.atomic_lines):
+                equivalent_widths[i, j, :] = _calculate_cog(
+                    transition, teff, logg, metallicity, xi, abundances)
 
     # Set minimum equivalent width as zero
     equivalent_widths = np.clip(equivalent_widths, 0, np.inf)
