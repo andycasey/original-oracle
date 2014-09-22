@@ -236,7 +236,7 @@ class ThereminModel(Model):
         fig = plot_balance(initial_transitions[ok])
         fig.savefig("balance.png")
         plt.close(fig)
-        #raise a
+        raise a
 
         global use_initial_transitions
         use_initial_transitions = [True]
