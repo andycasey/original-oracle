@@ -15,7 +15,7 @@ from time import time
 
 import numpy as np
 import numpy.lib.recfunctions
-from scipy import optimize as op
+from scipy import optimize as op, interpolate
 from scipy.ndimage import gaussian_filter1d
 
 from oracle import si, specutils, utils
@@ -236,8 +236,7 @@ class ThereminModel(Model):
         fig = plot_balance(initial_transitions[ok])
         fig.savefig("balance.png")
         plt.close(fig)
-        raise a
-
+        
         global use_initial_transitions
         use_initial_transitions = [True]
 
@@ -258,6 +257,12 @@ class ThereminModel(Model):
                             effective_temperature, surface_gravity, metallicity,
                             xi, transition, transition["equivalent_width"])
                     except si.SIException:
+                        return invalid_response
+
+                    except:
+                        logger.exception("Returning invalid response for parameters"\
+                            " {0} K, {1:.2f} km/s, logg = {2:.3f}, [M/H] = {3:.3f}".format(
+                                effective_temperature, xi, surface_gravity, metallicity))
                         return invalid_response
             else:
                 print("Using initial transitions")
@@ -319,6 +324,37 @@ class ThereminModel(Model):
         t_init = time()
         opt, infodict, ier, mesg = op.fsolve(
             lambda args: fast_balance(*tuple(args)), initial_theta, **op_kwargs)
+
+        teff, xi, logg, metallicity = initial_theta
+        opt_transitions, synthetic_spectra = model.optimise(
+            opt[0], opt[2], opt[3], opt[1], full_output=True)
+        ok = self._apply_constraints(initial_transitions, constraints)
+
+        
+        # Should we plot the transitions?
+        if plot_transitions:
+            logger.info("Plotting transition fits...")
+
+            for i, (transition, synthetic_spectrum) \
+            in enumerate(zip(opt_transitions, synthetic_spectra)):
+
+                # Which data index is the transition in?
+                data_index = model._get_data_index(i)
+
+                path = "transition-opt-{0:.2f}.png".format(transition["wavelength"])
+                fig = plot_transition(data[data_index], self, synthetic_spectrum, 
+                    transition["wavelength"], title="$\chi^2 = {0:.2f}$, [{1} "\
+                    "{2:.0f} @ {3:.2f}/H] = {4:.2f}, $EW = {5:.2f} m\AA$ ({6})".format(
+                        transition["chi_sq"], 
+                        utils.element(transition["atomic_number"]),
+                        transition["ionised"],
+                        transition["wavelength"],
+                        transition["abundance"],
+                        transition["equivalent_width"],
+                        ["REJECTED", "ACCEPTED"][ok[i]]))
+                fig.savefig(path)
+                logger.info("Created image {0}".format(path))
+                plt.close(fig)
 
         raise a
 
@@ -608,7 +644,7 @@ class SpectrumModel(Model):
 
     def _optimise_abundance(self, data, transition, effective_temperature,
         surface_gravity, metallicity, xi, tolerance=0.1, free_broadening=False,
-        full_output=False, **theta):
+        acceptable_rv_shift=None, full_output=False, **theta):
         """
         Fits an absorption profile leaving the redshift + continuum fixed.
         """
@@ -647,19 +683,65 @@ class SpectrumModel(Model):
         # This is some speedyness:
         with si.instance(transition=transition) as siu:
 
+            # Synthesise extremes and do interpolation?
+            initial_abundances = np.array([
+                metallicity - 2,
+                metallicity - 1,
+                metallicity,
+                metallicity + 1,
+                metallicity + 2,
+            ])
+
+            initial_fluxes = []
+            for initial_abundance in initial_abundances:
+                transition_spectrum, equivalent_width, stdout = siu.synthesise_transition(
+                    effective_temperature, surface_gravity, metallicity, xi,
+                    initial_abundance, self.synth_surrounding, (pixel_size, pixel_size,
+                        pixel_size), full_output=True)
+                initial_fluxes.append(transition_spectrum[:,1])
+                #if equivalent_width == 0:
+                #    initial_fluxes.extend([transition_spectrum[:,1]]*(len(initial_abundances) - len(initial_fluxes)))
+                #    break
+
+            # Create an interpolator
+            interpolator = interpolate.interp1d(initial_abundances,
+                np.array(initial_fluxes).T)
+            transition_dispersion = transition_spectrum[:,0].copy()
+
+            def approximate_transition(abundance):
+                try:
+                    return np.vstack([transition_dispersion, interpolator(abundance)]).T
+                except ValueError:
+                    transition_spectrum, equivalent_width, stdout = siu.synthesise_transition(
+                        effective_temperature, surface_gravity, metallicity, xi, 
+                        abundance, self.synth_surrounding, (pixel_size, pixel_size,
+                            pixel_size), full_output=True)
+                    return transition_spectrum
+
+            
             def chi_sq(args, full_output=False):
                 abundance = args[0]
-                transition_spectrum, equivalent_width, stdout = siu.synthesise_transition(
-                    effective_temperature, surface_gravity, metallicity, xi, 
-                    abundance, self.synth_surrounding, (pixel_size, pixel_size,
-                        pixel_size), full_output=True)
+ 
+                transition_spectrum = approximate_transition(abundance)
+
+                #transition_spectrum, equivalent_width, stdout = siu.synthesise_transition(
+                #    effective_temperature, surface_gravity, metallicity, xi, 
+                #    abundance, self.synth_surrounding, (pixel_size, pixel_size,
+                #        pixel_size), full_output=True)
+
+                if acceptable_rv_shift is not None:
+                    v = args[-1]
+
+                    if not (acceptable_rv_shift[1] >= v >= acceptable_rv_shift[0]):
+                        return np.inf
+                    transition_spectrum[:, 0] *= (1. + v/299792458.0)
 
                 # Any convolution?
                 if not free_broadening:
                     resolution = theta.get("instrumental_resolution_{0}".format(data_index), 0)
                     kernel = (wavelength/resolution)/(2.3548200450309493*pixel_size)
 
-                    if kernel > 0:
+                    if resolution > 0:
                         convolved_flux = gaussian_filter1d(transition_spectrum[:, 1],
                             kernel)
 
@@ -725,11 +807,19 @@ class SpectrumModel(Model):
             p0 = [metallicity]
             if free_broadening:
                 p0.append(28000)
+
+            if acceptable_rv_shift is not None:
+                p0.append(0.)
+
             xopt, fopt, direc, niter, nfunc, warnflag = op.fmin_powell(
                 chi_sq, p0, xtol=tolerance, ftol=tolerance, disp=False, full_output=True)
             self._opt_warn_message(warnflag, niter, nfunc, "fitting {0} {1:.0f} "\
                 "transition at {2:.1f} Angstroms".format(element, ionised, wavelength))
             
+
+            # Plot transitions again
+
+
             #epsilon = [0.01, 1000]
             #xopt, fopt, nfunc, ngrad, warnflag = op.fmin_cg(
             #    chi_sq, p0, gtol=0.001, epsilon=epsilon[::-1], disp=False,
@@ -858,7 +948,7 @@ class SpectrumModel(Model):
                     xopt[0], key, r_chi_sq, message))
 
                 if free_broadening:
-                    row = list(xopt) + [r_chi_sq, equivalent_width]
+                    row = list(xopt[:2]) + [r_chi_sq, equivalent_width]
                 else:
                     row = [xopt[0], initial_theta["instrumental_resolution_{0}".format(i)]]
                     row.extend([r_chi_sq, equivalent_width])
