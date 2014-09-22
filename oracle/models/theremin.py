@@ -1145,11 +1145,13 @@ def _calculate_cog(transition, teff, logg, metallicity, xi, abundances, **kwargs
                 equivalent_widths[k] = np.nan
 
             else:
-                equivalent_widths[k] = equivalent_width
+                print(equivalent_width)
                 if equivalent_width == 0:
                     break
 
-    assert np.all(np.diff(equivalent_widths[::-1]) >= 0)
+    if np.all(np.isfinite(equivalent_widths)):
+        assert np.all(np.diff(equivalent_widths[::-1]) >= 0)
+    print(equivalent_widths)
     return equivalent_widths
 
 
