@@ -723,7 +723,8 @@ class SpectrumModel(Model):
             def chi_sq(args, full_output=False):
                 abundance = args[0]
  
-                transition_spectrum = approximate_transition(abundance)
+            
+                #transition_spectrum = approximate_transition(abundance)
 
                 #transition_spectrum, equivalent_width, stdout = siu.synthesise_transition(
                 #    effective_temperature, surface_gravity, metallicity, xi, 
@@ -1007,7 +1008,7 @@ def _calculate_cog(transition, teff, logg, metallicity, xi, abundances, **kwargs
     assert abundances[0] > abundances[-1]
     equivalent_widths = np.zeros(len(abundances))
     with si.instance(transition=transition) as siu:
-        for k, abundance in enumerate(abundances[::-1]):
+        for k, abundance in enumerate(abundances):
             try:
                 spectrum, equivalent_width, stdout = siu.synthesise_transition(
                     teff, logg, metallicity, xi, abundance, **kwargs)
