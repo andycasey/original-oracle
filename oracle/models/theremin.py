@@ -109,6 +109,9 @@ class ThereminModel(Model):
         for constraint in constraints:
             acceptable *= eval(constraint, environment)
 
+        # Default constraint:
+        acceptable *= np.isfinite(abundance_data["abundance"])
+
         return acceptable
 
 
@@ -151,6 +154,30 @@ class ThereminModel(Model):
 
         :type data:
             list of :class:`specutils.Spectrum1D` objects
+
+        :param constraints: [optional]
+            Data quality constraints to apply to the transitions to use for
+            stellar parameter determination. If no constraints are given, then
+            the default ones are employed:
+
+            > default_constraints = [
+                "equivalent_width > 5", # mA
+                "120 >= equivalent_width",
+                "abundance > -5",
+                "5 > abundance",
+                "chi_sq < 10",
+                "equivalent_width/wavelength < np.exp(1e-3)
+            ]
+
+        :type constraints:
+            list
+
+        :param plot_transitions: [optional]
+            Plot the transition figures.
+
+        :type plot_transitions:
+            bool
+
         """
 
         invalid_response = np.array([np.inf]*4)
@@ -159,8 +186,8 @@ class ThereminModel(Model):
 
         if constraints is None:
             constraints = [
-                "equivalent_width > 0",
-                "120 >= equivalent_width",
+                "equivalent_width > 5", # mA 
+                "120 >= equivalent_width", # mA
                 "abundance > -5",
                 "5 > abundance",
                 "chi_sq < 10",
@@ -179,7 +206,8 @@ class ThereminModel(Model):
         teff, xi, logg, metallicity = initial_theta
         initial_transitions, synthetic_spectra = model.optimise(
             teff, logg, metallicity, xi, full_output=True)
-
+        ok = self._apply_constraints(initial_transitions, constraints)
+        
         # Should we plot the transitions?
         if plot_transitions:
             logger.info("Plotting transition fits...")
@@ -193,23 +221,22 @@ class ThereminModel(Model):
                 path = "transition-fit-{0:.2f}.png".format(transition["wavelength"])
                 fig = plot_transition(data[data_index], self, synthetic_spectrum, 
                     transition["wavelength"], title="$\chi^2 = {0:.2f}$, [{1} "\
-                    "{2:.0f} @ {3:.2f}/H] = {4:.2f}, $EW = {5:.2f} m\AA$".format(
+                    "{2:.0f} @ {3:.2f}/H] = {4:.2f}, $EW = {5:.2f} m\AA$ ({6})".format(
                         transition["chi_sq"], 
                         utils.element(transition["atomic_number"]),
                         transition["ionised"],
                         transition["wavelength"],
                         transition["abundance"],
-                        transition["equivalent_width"]))
+                        transition["equivalent_width"],
+                        ["REJECTED", "ACCEPTED"][ok[i]]))
                 fig.savefig(path)
                 logger.info("Created image {0}".format(path))
                 plt.close(fig)
 
-
-        ok = self._apply_constraints(initial_transitions, constraints)
         fig = plot_balance(initial_transitions[ok])
-
-        raise a
-
+        fig.savefig("balance.png")
+        plt.close(fig)
+        #raise a
 
         global use_initial_transitions
         use_initial_transitions = [True]
@@ -862,7 +889,30 @@ class SpectrumModel(Model):
         return results
 
 
-def calculate_cog_tables(model, order=3, limits=None, spacings=None,
+def approximate_jacobian(model, order=3, limits=None, spacings=None, **kwargs):
+
+    # Calculate 
+
+
+    # For some stellar parameters I can predict what the EWs will be
+
+    # at each point:
+    # approximate abundances for a given EW from interpolator
+    # measure slopes
+    # next step
+
+    # interpolator needs:
+    # teff, logg, xi, ew --> abundance
+
+    # Need to approximate:
+    # partial derivatives for all points
+    None
+
+
+
+
+
+def calculate_cog_tables(model, abundances=[-3, -2.5, -2, -1.5, -1, -0.5, 0.0, 0.5], limits=None, spacings=None,
     **kwargs):
     """
     At each permutation of stellar parameters, calculate the abundances for all
@@ -873,7 +923,7 @@ def calculate_cog_tables(model, order=3, limits=None, spacings=None,
         "teff": [4000, 6500],
         "logg": [0, 5],
         "[M/H]": [-3, 1.0],
-        "xi": [0.5, 6.5]
+        "xi": [0.5, 4.0]
     }
 
     use_spacings = {
@@ -902,8 +952,8 @@ def calculate_cog_tables(model, order=3, limits=None, spacings=None,
     stellar_parameter_combinations = list(itertools.product(*points))
 
     # Create an array to store all the equivalent widths
-    n_c, n_ew = map(len, [stellar_parameter_combinations, model.atomic_lines])
-    equivalent_widths = np.zeros((n_c, n_ew))
+    n_c, n_ew, n_abund = map(len, [stellar_parameter_combinations, model.atomic_lines, abundances])
+    equivalent_widths = np.zeros((n_c, n_ew, n_abund))
 
     for i, stellar_parameters in enumerate(stellar_parameter_combinations):
 
@@ -914,15 +964,17 @@ def calculate_cog_tables(model, order=3, limits=None, spacings=None,
         # stellar parameters
         for j, transition in enumerate(model.atomic_lines):
 
-            try:
-                spectrum, equivalent_width, stdout = si.synthesise_transition(
-                    teff, logg, metallicity, xi, transition, metallicity, **kwargs)
+            for k, abundance in enumerate(abundances):
 
-            except si.SIException:
-                equivalent_widths[i, j] = np.nan
+                try:
+                    spectrum, equivalent_width, stdout = si.synthesise_transition(
+                        teff, logg, metallicity, xi, transition, abundance, **kwargs)
 
-            else:
-                equivalent_widths[i, j] = equivalent_width
+                except (si.SIException, OSError):
+                    equivalent_widths[i, j, k] = np.nan
+
+                else:
+                    equivalent_widths[i, j, k] = equivalent_width
 
     # Set minimum equivalent width as zero
     equivalent_widths = np.clip(equivalent_widths, 0, np.inf)

@@ -20,14 +20,10 @@ from scipy import optimize as op, integrate, stats
 from scipy.ndimage import gaussian_filter1d
 
 from . import line, profiles
-from oracle import specutils, utils
-#[TODO]: This fails because of a circular import (probably), but we will move to
-# SI anyways so we don't need it.
-#from oracle import moog 
-from .model import Model, _log_prior_eval_environment
+from oracle import si, specutils, utils
+from oracle.models import Model
 
 logger = logging.getLogger("oracle")
-
 
 class SpectralChannel(Model):
 
@@ -163,7 +159,11 @@ class SpectralChannel(Model):
             flux = np.ones(len(dispersion))
         
         # Model the absorption profiles
-        fwhm_key = ["fwhm_{0}", "fwhm_instrumental"][self.config["classical"].get("use_instrumental_profile", False)]
+        if self.config["classical"].get("use_instrumental_profile", False):
+            fwhm_key = "fwhm_{0}"
+        else:
+            fwhm_key = "fwhm_instrumental"
+
         indices = [int(p.split("_")[1]) for p in theta if p.startswith("ld_")]
         for index in indices:
             depth = theta["ld_{0}".format(index)]
@@ -777,6 +777,10 @@ class ClassicalModel(Model):
         self.data = data
         # Create channels.
         self.channels = [SpectralChannel(configuration, i) for i in range(len(data))]
+
+        # Load the line list
+        self.atomic_lines = si.io.read_line_list(
+            self.config["ClassicalModel"]["clean_line_list_filename"])
         return None
 
 

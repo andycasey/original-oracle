@@ -44,24 +44,23 @@ if "install" in sys.argv:
                 "ser-xe-evaluation-options")
 
         # Install SI
-        print("Removing any old instances of SI..")
         cwd = os.path.join(os.path.dirname(os.path.abspath(
             os.path.expanduser(__file__))), "oracle/si/code")
-
-        try:
-            os.remove(os.path.join(cwd, "../si_lineform"))
-            map(os.remove, glob(os.path.join(cwd, "*.o")))
-
-        except OSError:
-            None
+        
+        #print("Removing any old instances of SI..")
+        #try:
+        #    os.remove(os.path.join(cwd, "../si_lineform"))
+        #    map(os.remove, glob(os.path.join(cwd, "*.o")))
+        #except OSError:
+        #    None
 
         print("Installing SI..")
         installer = subprocess.call("make", cwd=cwd, shell=True,
             env=os.environ.copy())
 
         # Clean up either way.
-        print("Cleaning up..")
-        cleaner = map(os.remove, glob(os.path.join(cwd, "*.o")))
+        #print("Cleaning up..")
+        #cleaner = map(os.remove, glob(os.path.join(cwd, "*.o")))
         
         if installer != 0:
             raise Exception("SI fortran code could not be compiled")

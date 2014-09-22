@@ -77,6 +77,10 @@ class Model(object):
     def _validate(self):
         """ Check that the configuration is valid. """
 
+        # Default things that we should have.
+        self.config.setdefault("mask", [])
+        self.config["mask"] = np.array(self.config["mask"])
+
         if not self.config.has_key("model"):
             raise KeyError("no model information specified")
 
