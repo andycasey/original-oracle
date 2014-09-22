@@ -1,13 +1,24 @@
 {% extends 'layouts/form.html' %}
 {% block title %}Login{% endblock %}
 {% block content %}
-  <form method="post" class="form">
-    <h3 class="form-heading">Login <a href="{{ url_for('home') }}" title="Back to homepage"><i class="fa fa-home pull-right"></i></a></h3>
-    {{ form.name(class_ = 'form-control first-input', placeholder = form.name.label.text, required = true, autofocus = true) }}
-    {{ form.password(class_ = 'form-control last-input', placeholder = form.password.label.text, required = true) }}
-    <p class="pull-left"><a href="{{ url_for('forgot') }}">Forgot Password?</a></p>
-    <p class="pull-right"><a href="{{ url_for('register') }}">Register</a></p>
-    <input type="submit" value="Submit" class="btn btn-primary btn-lg btn-block" disabled>
-    <p>You must add database as well as Flask-Login to enable user management. See the <a href="http://www.realpython.com">Real Python</a> course for more info!</p>
-  </form>
+
+<div class="box">
+    <div class="content-wrap">
+        <h6>Log in</h6>
+        <input class="form-control" type="text" placeholder="E-mail address">
+        <input class="form-control" type="password" placeholder="Your password">
+        <a href="#" class="forgot">Forgot password?</a>
+        <div class="remember">
+            <input id="remember-me" type="checkbox">
+            <label for="remember-me">Remember me</label>
+        </div>
+        <a class="btn-glow primary login" href="index.html">Log in</a>
+    </div>
+</div>
+
+<div class="no-account">
+    <p>Don't have an account?</p>
+    <a href="signup.html">Sign up</a>
+</div>   
+
 {% endblock %}

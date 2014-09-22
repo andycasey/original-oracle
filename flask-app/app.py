@@ -39,21 +39,25 @@ def login_required(test):
 # Controllers.
 #----------------------------------------------------------------------------#
 
-
 @app.route('/')
 def home():
     return render_template('pages/placeholder.home.html')
 
 
-@app.route('/about')
-def about():
-    return render_template('pages/placeholder.about.html')
+@app.route('/users')
+def users():
+    return render_template('pages/users.html')
 
 
 @app.route('/login')
 def login():
     form = LoginForm(request.form)
     return render_template('forms/login.html', form=form)
+
+@app.route('/signup')
+def signup():
+
+    return render_template('forms/signup.html')
 
 
 @app.route('/register')
