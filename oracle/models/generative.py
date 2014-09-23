@@ -142,16 +142,9 @@ class GenerativeModel(Model):
         if synth_kwargs is None:
             synth_kwargs = {}
 
-        synth_kwargs["full_output"] = False
-        synth_kwargs["chunk"] = False
-        synth_kwargs["wavelength_steps"] = (0.05, 0.05, 0.05)
-        if "wavelength_steps" in synth_kwargs:
-            synth_kwargs.pop("wavelength_steps")
-
-        # Request the wavelength step to be ~twice the observed pixel sampling.
-        #if data is not None:f
-        #    synth_kwargs.setdefault("wavelength_steps",
-        #        [(0., np.min(np.diff(each.disp))/2., 0.) for each in data])
+        # Update with defaults
+        for key, value in self._get_speedy_synth_kwargs(data).iteritems():
+            synth_kwargs.setdefault(key, value)
         
         # Synthesis ranges should contain only regions that are not masked out
         synthesis_ranges = utils.invert_mask(self.config["mask"], data=data,
@@ -159,6 +152,13 @@ class GenerativeModel(Model):
     
         # Synthesise the model spectra first (in parallel where applicable) and
         # then apply the cheap transformations in serial.
+
+        # Extend wavelength_steps to match length of synthesis_ranges
+        if "wavelength_steps" in synth_kwargs:
+            # Check
+            if isinstance(synth_kwargs["wavelength_steps"][0], (tuple, list)) \
+            and len(synth_kwargs["wavelength_steps"]) != len(synthesis_ranges):
+                synth_kwargs["wavelength_steps"] = [synth_kwargs["wavelength_steps"][0]] * len(synthesis_ranges)
 
         # Note: Pass keyword arguments so that the cacher works.
         synthesised_spectra = si.synthesise(theta["teff"], theta["logg"], 

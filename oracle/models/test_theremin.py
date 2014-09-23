@@ -6,13 +6,16 @@ from __future__ import absolute_import, print_function
 
 __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 
+import logging
 from glob import glob
 
 import theremin
 
+logger = logging.getLogger("oracle")
+
 
 config = {
-    "model": {
+      "model": {
       "continuum": False,
       "redshift": False,
       "instrumental_broadening": True
@@ -308,14 +311,24 @@ config = {
       [7891.6156, 7900]
     ]
   }
-filenames = glob("../tests/data/benchmarks/18Sco/18Sco_narval*noresample*")
-data = map(theremin.specutils.Spectrum1D.load, filenames)
-data.sort(key=lambda s: s.disp[0])
 
-model = theremin.ThereminModel(config)
-spectrum_model = theremin.SpectrumModel(config, data)
+benchmarks = [each.split("/")[-2] for each in glob("../tests/data/benchmarks/*/*blue_noresample.txt")]
 
-#result = model.optimise(data, plot_transitions=True)
+for benchmark in benchmarks:
 
+    filenames = glob("../tests/data/benchmarks/{0}/{0}_narval*noresample*".format(benchmark))
+    data = map(theremin.specutils.Spectrum1D.load, filenames)
+    data.sort(key=lambda s: s.disp[0])
+
+    model = theremin.ThereminModel(config)
+    #spectrum_model = theremin.SpectrumModel(config, data)
+
+    parameters, converged, transitions, spectra = model.optimise(data, plot_transitions=True)
+
+    if converged:
+        # Do something with the results?
+        print("Start {0} has converged with {1}".format(benchmark, parameters))
+
+    break
 
 

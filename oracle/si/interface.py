@@ -17,6 +17,7 @@ from random import choice
 from signal import alarm, signal, SIGALRM, SIGKILL
 from string import ascii_letters
 from subprocess import PIPE, Popen
+from time import time
 from textwrap import dedent
 
 from oracle.si import io, utils
@@ -92,7 +93,6 @@ class instance(object):
             siu_line_list = os.path.abspath(os.path.join(os.path.dirname(
                 os.path.expanduser(__file__)),  "linedata/master_line.dat")) 
             os.symlink(siu_line_list, os.path.join(self.twd, "linedata.dat"))
-
         return self
 
 
@@ -329,7 +329,6 @@ class instance(object):
             return (equivalent_width, synthetic_spectra, stdout)
         return equivalent_width
 
-    @utils.limiting_transition
     @utils.rounder(None, 0, 3, 3, 3, 3, 3)
     @utils.lru_cache(maxsize=128, typed=False)
     def synthesise_transition(self, teff, logg, metallicity, xi, abundance,
@@ -788,20 +787,51 @@ def synthesise_transition(teff, logg, metallicity, xi, transition, abundance,
 
 
 def find_abundance(transition, effective_temperature, surface_gravity,
-    metallicity, xi, equivalent_width, tolerance=0.01, **kwargs):
+    metallicity, xi, equivalent_width, xtol=5, ftol=0.01, full_output=False, **kwargs):
+
+    abundance_floor = [np.nan]
+
+
 
     with instance(transition=transition) as si:
 
-        def func(args):
+        def func(args, full_output=False):
             abundance = args[0]
+
+            # Use an abundance floor for speedyness
+            if abundance < abundance_floor[0] and not full_output:
+                return equivalent_width
+
             spectrum, returned_equivalent_width, stdout = si.synthesise_transition(
                 effective_temperature, surface_gravity, metallicity, xi, abundance,
                 full_output=True, **kwargs)
-            return equivalent_width - returned_equivalent_width
-        result = op.fsolve(func, 0., xtol=tolerance, factor=0.1)
 
-    return result[0]
+            if ftol > returned_equivalent_width:
+                abundance_floor[0] = abundance
 
+            difference = equivalent_width - returned_equivalent_width
+            if full_output:
+                if 1 > returned_equivalent_width: # numerical result
+                    returned_equivalent_width = 0
+                return (difference, spectrum, returned_equivalent_width, stdout)
+            return difference
+
+        result = op.fsolve(func, 1., xtol=ftol/10., factor=0.1)
+        fopt = list(func(result, True))
+
+        abundance = result[0] if fopt[2] > 0 else np.nan
+        if abs(fopt[0]) > xtol:
+            logger.warn("Equivalent width tolerance mis-match for {0} {1} "\
+                "transition at {2:.3f}: {3:.2f} > {4:.2f}. [{0} {1} @ {2:.3f}/H]"\
+                " = {5:.2f}{6}".format(
+                    utils.element(transition["atomic_number"]),
+                    transition["ionised"], transition["wavelength"], abs(fopt[0]),
+                    xtol, abundance, ["", " (setting as nan)"][np.isfinite(abundance)]))
+            abundance = np.nan
+
+    if full_output:
+        return [abundance] + fopt
+    return abundance
 
 def abfind(teff, logg, metallicity, xi, transition, equivalent_width,
     tolerance=0.01, full_output=False, **kwargs):

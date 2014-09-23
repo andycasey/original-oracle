@@ -48,7 +48,6 @@ _log_prior_eval_environment = {
 }
 
 
-
 class Model(object):
 
     def __init__(self, configuration):

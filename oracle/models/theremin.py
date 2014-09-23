@@ -26,6 +26,10 @@ from oracle.models import Model, line
 
 logger = logging.getLogger("oracle")
 
+
+class ConvergenceAchieved(Exception):
+    pass
+
 class ThereminModel(Model):
 
     def __init__(self, configuration):
@@ -146,8 +150,8 @@ class ThereminModel(Model):
         return np.array([exc_slope, lst_slope, ionisation_state, metallicity_state])
 
 
-    def optimise(self, data, initial_theta=None, constraints=None, 
-        plot_transitions=True):
+    def optimise(self, data, initial_theta=None, constraints=None, update_blended_interval=1,
+        plot_transitions=True, plot_filename_prefix="transition-"):
         """
         Optimise the model parameters given some data.
 
@@ -181,6 +185,7 @@ class ThereminModel(Model):
             bool
 
         """
+        t_started = time()
 
         invalid_response = np.array([np.inf]*4)
         if initial_theta is None:
@@ -189,11 +194,11 @@ class ThereminModel(Model):
         if constraints is None:
             constraints = [
                 "equivalent_width > 5", # mA 
-                "120 >= equivalent_width", # mA
-                "abundance > -5",
-                "5 > abundance",
-                "chi_sq < 10",
-                "equivalent_width/wavelength < np.exp(1e-3)"
+                "150 >= equivalent_width", # mA
+                "warnflag == 0",
+                "np.abs(wavelength - 6563) > 100",
+                "np.abs(wavelength - 4861) > 100"
+ #               "equivalent_width/wavelength < np.exp(1e-3)"
             ]
 
         logger.info("Initial stellar parameters: Teff = {0:.0f} K, log(g) = "\
@@ -202,14 +207,13 @@ class ThereminModel(Model):
         # At each stellar parameter test we need to re-fit all the lines
         # So we need another model class.
         model = SpectrumModel(self.config, data)
-
         # Since we use a LRU cache, we can do this out here with no slowdown
         #("teff", "xi", "logg", "[M/H]")
         teff, xi, logg, metallicity = initial_theta
         initial_transitions, synthetic_spectra = model.optimise(
             teff, logg, metallicity, xi, full_output=True)
         ok = self._apply_constraints(initial_transitions, constraints)
-        
+
         # Should we plot the transitions?
         if plot_transitions:
             logger.info("Plotting transition fits...")
@@ -220,7 +224,8 @@ class ThereminModel(Model):
                 # Which data index is the transition in?
                 data_index = model._get_data_index(i)
 
-                path = "transition-fit-{0:.2f}.png".format(transition["wavelength"])
+                path = "{0}fit-{1:.2f}.png".format(plot_filename_prefix,
+                    transition["wavelength"])
                 fig = plot_transition(data[data_index], self, synthetic_spectrum, 
                     transition["wavelength"], title="$\chi^2 = {0:.2f}$, R={7:.0f}, [{1} "\
                     "{2:.0f} @ {3:.2f}/H] = {4:.2f}, $EW = {5:.2f} m\AA$ ({6})".format(
@@ -239,8 +244,6 @@ class ThereminModel(Model):
         fig.savefig("balance.png")
         plt.close(fig)
         
-        raise a
-
         global use_initial_transitions
         use_initial_transitions = [True]
 
@@ -250,126 +253,113 @@ class ThereminModel(Model):
         @utils.lru_cache(maxsize=25, typed=False)
         def fast_balance(effective_temperature, xi, surface_gravity, metallicity):
 
-            print("START", effective_temperature, xi, surface_gravity, metallicity)
-            
+            t_init = time()
+            logger.info("Trying Teff = {0:.0f} K, xi = {1:.3f} km/s, logg = "\
+                "{2:.3f}, [M/H] = {3:.3f}".format(effective_temperature, xi,
+                    surface_gravity, metallicity))
+
             transitions = initial_transitions.copy()
             global use_initial_transitions
             if not use_initial_transitions[0]:
                 for i, transition in enumerate(transitions):
                     try:
-                        transitions[i]["abundance"] = si.interface.abfind(
-                            effective_temperature, surface_gravity, metallicity,
-                            xi, transition, transition["equivalent_width"])
+                        transitions[i]["abundance"] = si.find_abundance(
+                            transition, effective_temperature, surface_gravity,
+                            metallicity, xi, transition["equivalent_width"])
+
                     except si.SIException:
                         return invalid_response
 
-                    except:
+                    except: 
                         logger.exception("Returning invalid response for parameters"\
                             " {0} K, {1:.2f} km/s, logg = {2:.3f}, [M/H] = {3:.3f}".format(
                                 effective_temperature, xi, surface_gravity, metallicity))
                         return invalid_response
             else:
-                print("Using initial transitions")
                 use_initial_transitions = [False]
 
             ok = self._apply_constraints(transitions, constraints)
+            fig = plot_balance(transitions[ok])
+            fig.savefig("balance.png")
+            plt.close(fig)
 
-            print(ok)
-
-            print("MIN", transitions[ok]["abundance"].min())
-            fig = plot.balance(transitions[ok])
-            fig.savefig("transitions.png")
-            import matplotlib.pyplot as plt
-            plt.close("all")
-
-            state = self._slopes(transitions[ok], metallicity)
-
-            print("END", [effective_temperature, xi, surface_gravity, metallicity], state)
-            return state
-
-
-
-        def classical_balance(stellar_parameters):
-
-            print("START", stellar_parameters)
-            teff, xi, logg, metallicity = stellar_parameters
-
-            try:
-                transitions = model.optimise(teff, logg, metallicity, xi)
-
-            except si.SIException:
-                return invalid_response
-
-            # Get a mask of the acceptable lines
-            ok = self._apply_constraints(transitions, constraints)
-
-            # This is a necessary quality constraint:
-            ok *= np.isfinite(transitions["abundance"])
-
-            if not any(ok):
-                return invalid_response
-
-            state = self._slopes(transitions[ok], metallicity)
-
-            if np.any(~np.isfinite(state)):
+            bad = np.where(transitions[ok]["abundance"] < -4)[0]
+            for each in bad:
+                print(transitions[ok][each]["wavelength"], "bad")
                 raise a
-            print("END", stellar_parameters,state)
 
+            state = self._slopes(transitions[ok], metallicity)
+            if np.all(np.less_equal(np.abs(state), [1e-3, 1e-3, 1e-3, 1e-3])):
+                raise ConvergenceAchieved(state)
+
+            logger.info("State for {0} is {1} and took {2:.2f} seconds".format(
+                [effective_temperature, xi, surface_gravity, metallicity], state,
+                time() - t_init))
             return state
 
         op_kwargs = {
             "col_deriv": 1,
             "epsfcn": 0,
             "xtol": 1e-16,
-            "maxfev": 100,
+            "maxfev": 20,
             "fprime": utils.stellar_jacobian,
             "full_output": True # Necessary for introspection and provenance.
         }
         t_init = time()
-        opt, infodict, ier, mesg = op.fsolve(
-            lambda args: fast_balance(*tuple(args)), initial_theta, **op_kwargs)
+        i, converged = 0, False
+        from_theta = initial_theta
+        try:
+            opt, infodict, ier, mesg = op.fsolve(
+                lambda args: fast_balance(*tuple(args)), initial_theta, **op_kwargs)
 
-        teff, xi, logg, metallicity = initial_theta
-        opt_transitions, synthetic_spectra = model.optimise(
-            opt[0], opt[2], opt[3], opt[1], full_output=True)
-        ok = self._apply_constraints(initial_transitions, constraints)
+        except ConvergenceAchieved:
+            # woo hoo!
+            converged = True
 
-        
-        # Should we plot the transitions?
-        if plot_transitions:
-            logger.info("Plotting transition fits...")
+            teff, xi, logg, metallicity = initial_theta
+            opt_transitions, synthetic_spectra = model.optimise(
+                opt[0], opt[2], opt[3], opt[1], full_output=True)
+            ok = self._apply_constraints(initial_transitions, constraints)
 
-            for i, (transition, synthetic_spectrum) \
-            in enumerate(zip(opt_transitions, synthetic_spectra)):
+            # Should we plot the transitions?
+            if plot_transitions:
+                logger.info("Plotting transition fits...")
 
-                # Which data index is the transition in?
-                data_index = model._get_data_index(i)
+                for i, (transition, synthetic_spectrum) \
+                in enumerate(zip(opt_transitions, synthetic_spectra)):
 
-                path = "transition-opt-{0:.2f}.png".format(transition["wavelength"])
-                fig = plot_transition(data[data_index], self, synthetic_spectrum, 
-                    transition["wavelength"], title="$\chi^2 = {0:.2f}$, [{1} "\
-                    "{2:.0f} @ {3:.2f}/H] = {4:.2f}, $EW = {5:.2f} m\AA$ ({6})".format(
-                        transition["chi_sq"], 
-                        utils.element(transition["atomic_number"]),
-                        transition["ionised"],
-                        transition["wavelength"],
-                        transition["abundance"],
-                        transition["equivalent_width"],
-                        ["REJECTED", "ACCEPTED"][ok[i]]))
-                fig.savefig(path)
-                logger.info("Created image {0}".format(path))
-                plt.close(fig)
+                    # Which data index is the transition in?
+                    data_index = model._get_data_index(i)
 
-        raise a
+                    path = "{0}opt-{1:.2f}.png".format(plot_filename_prefix,
+                        transition["wavelength"])
+                    fig = plot_transition(data[data_index], self, synthetic_spectrum, 
+                        transition["wavelength"], title="$\chi^2 = {0:.2f}$, [{1} "\
+                        "{2:.0f} @ {3:.2f}/H] = {4:.2f}, $EW = {5:.2f} m\AA$ ({6})".format(
+                            transition["chi_sq"], 
+                            utils.element(transition["atomic_number"]),
+                            transition["ionised"],
+                            transition["wavelength"],
+                            transition["abundance"],
+                            transition["equivalent_width"],
+                            ["REJECTED", "ACCEPTED"][ok[i]]))
+                    fig.savefig(path)
+                    logger.info("Created image {0}".format(path))
+                    plt.close(fig)
 
-        return None
+            if full_output:
+                return xopt, converged, opt_transitions, synthetic_spectra
+       
+        logger.info("done in ",time() - t_started)
+
+        return xopt, converged
 
 
 
 class SpectrumModel(Model):
 
     _abundance_key = "[{0}{1:.0f}@{2:.1f}/H]"
-    synth_surrounding = 2.
+    synth_surrounding = 1.
 
     def __init__(self, configuration, data):
         """
@@ -873,15 +863,6 @@ class SpectrumModel(Model):
             utils.element(atomic_number), ionised, wavelength)
 
 
-
-    """
-    self._optimise_abundance(
-                        observed_spectrum, transition, effective_temperature,
-                        surface_gravity, metallicity, xi, full_output=True, 
-                        free_broadening=free_broadening, **initial_theta)
-
-                    xopt, r_chi_sq, equivalent_width, spectrum = result
-    """
     def _blending_spectrum(wavelength_region):
 
         element = utils.element(transition["atomic_number"])
@@ -928,6 +909,7 @@ class SpectrumModel(Model):
 
         disp = data.disp.__getslice__(*indices)
         flux = data.flux.__getslice__(*indices).copy() 
+        variance = data.variance.__getslice__(*indices)
         ivariance = data.ivariance.__getslice__(*indices)
         pxs = np.diff(disp).mean()
 
@@ -942,54 +924,55 @@ class SpectrumModel(Model):
 
         def chi_sq(args, full_output=False):
 
-            depth, resolution = args
-            if not (1 >= depth >= 0) or not (30000 >= resolution >= 15000):
+            depth, resolution, wl_offset = args
+            if not (1 >= depth >= 0) or not (30000 >= resolution >= 20000) \
+            or not (0.05 > wl_offset > -0.05):
                 return invalid_response
 
             sigma = (wavelength/resolution)/2.35482
             background_flux = continuum * np.interp(disp,
                 blending_spectrum[:, 0] * (1. + z),
                 gaussian_filter1d(blending_spectrum[:, 1], sigma/pxs))
-        
+
+            # Only allow +/- 0.25 Angstroms to continue to line fitting
+            #contribution = np.ones(len(disp)) * np.nan
+            #indices = disp.searchsorted([
+            #    wavelength - 0.4, wavelength + 0.4])
+            #contribution[indices[0]:indices[1] + 1] = 1.
+            
             # [TODO] This approximation is only suitable for weak regimes.
-            profile = lambda x: depth * np.exp(-(x - wavelength \
+            profile = lambda x: depth * np.exp(-(x - (wavelength + wl_offset) \
                 * (1. + z))**2 / (2*sigma**2))
-            expected = background_flux * (1.0 - profile(disp))
+            expected = background_flux * (1.0 - profile(disp)) 
 
-            # Only allow +/- 0.5 Angstroms to continue to line fitting
-            contribution = np.ones(len(disp)) * np.nan
-            indices = disp.searchsorted([
-                wavelength - 0.5, wavelength + 0.5])
-            contribution[indices[0]:indices[1] + 1] = 1.
-
-            chi_sq_i = (flux - expected)**2 * ivariance * mask * contribution
-            dof = np.isfinite(chi_sq_i).sum()
+            chi_sq_i = (flux - expected)**2 * ivariance * mask
+            
             chi_sq = chi_sq_i[np.isfinite(chi_sq_i)].sum()
+            dof = np.isfinite(chi_sq_i).sum()
             r_chi_sq = chi_sq/(dof - 1)
 
             if full_output:
                 equivalent_width = depth * sigma * np.sqrt(2 * np.pi) * 10e2
                 return (chi_sq, r_chi_sq, equivalent_width,
                     np.vstack([disp, expected, background_flux]).T)
-            return chi_sq
+            return r_chi_sq
 
         # Minimise the function.
         index = disp.searchsorted(wavelength)
         # TODO: specify initial resolution guess
-        p0 = [1.0 - flux[index], 28000]
+        p0 = [1.0 - flux[index], 28000, 0]#, 0.1, np.mean(variance)]
         if not np.isfinite(p0[0]):
             p0[0] = 1.0
 
         xopt, fopt, niter, nfunc, warnflag = op.fmin(
             chi_sq, p0, disp=False, full_output=True)
-        self._opt_warn_message(warnflag, niter, nfunc, "fitting {0} {1:.0f} "\
+        self._opt_warn_message(warnflag, niter, nfunc, " fitting {0} {1:.0f} "\
             "transition at {2:.1f} Angstroms".format(
                 utils.element(transition["atomic_number"]), transition["ionised"],
                 wavelength))
         xopt = xopt.reshape(-1)
 
         #xopt, r_chi_sq, equivalent_width, spectrum = result
-
         r_chi_sq, equivalent_width, spectrum = chi_sq(xopt, True)[1:]
         result = [xopt, r_chi_sq, equivalent_width, spectrum]
 
@@ -1070,9 +1053,8 @@ class SpectrumModel(Model):
                 xopt, r_chi_sq, equivalent_width, spectrum = result
 
                 # Calculate abundance
-                #with si.instance(transition=transition):
-                #    abundances = np.arange(metallicity - 0.5, metallicity + 1.5, 0.5)
-                abundance = 0
+                abundance = si.find_abundance(transition, effective_temperature,
+                    surface_gravity, metallicity, xi, equivalent_width)
 
                 # Save and announce the results
                 key = self._format_abundance_key(transition)
@@ -1085,7 +1067,8 @@ class SpectrumModel(Model):
                     abundance, key, r_chi_sq, message))
 
                 # Save to table
-                rows.append([abundance, xopt[0], xopt[1], r_chi_sq, equivalent_width])
+                rows.append([abundance, xopt[0], xopt[1], r_chi_sq, equivalent_width,
+                    warnflag])
                 spectra.append(spectrum)
 
         logger.info("Optimised line fitting in {0:.2f} seconds".format(
@@ -1102,31 +1085,12 @@ class SpectrumModel(Model):
         results = numpy.lib.recfunctions.append_fields(
             np.array([self.atomic_lines[i] for i in transition_indices]),
             ("abundance", "line_depth", "instrumental_resolution", "chi_sq", 
-                "equivalent_width"), np.array(rows).T, usemask=False)
+                "equivalent_width", "warnflag"), np.array(rows).T, usemask=False)
 
         if full_output:
             return (results, spectra)
         return results
 
-
-def approximate_jacobian(model, order=3, limits=None, spacings=None, **kwargs):
-
-    # Calculate 
-
-
-    # For some stellar parameters I can predict what the EWs will be
-
-    # at each point:
-    # approximate abundances for a given EW from interpolator
-    # measure slopes
-    # next step
-
-    # interpolator needs:
-    # teff, logg, xi, ew --> abundance
-
-    # Need to approximate:
-    # partial derivatives for all points
-    None
 
 
 def _calculate_cog(transition, teff, logg, metallicity, xi, abundances, **kwargs):
@@ -1141,17 +1105,13 @@ def _calculate_cog(transition, teff, logg, metallicity, xi, abundances, **kwargs
                 spectrum, equivalent_width, stdout = siu.synthesise_transition(
                     teff, logg, metallicity, xi, abundance, **kwargs)
 
-            except (si.SIException, OSError):
+            except si.SIException:
                 equivalent_widths[k] = np.nan
 
             else:
-                print(equivalent_width)
+                equivalent_widths[k] = equivalent_width
                 if equivalent_width == 0:
                     break
-
-    if np.all(np.isfinite(equivalent_widths)):
-        assert np.all(np.diff(equivalent_widths[::-1]) >= 0)
-    print(equivalent_widths)
     return equivalent_widths
 
 
@@ -1221,7 +1181,11 @@ def calculate_cog_tables(model, abundances=[-3, -2.5, -2, -1.5, -1, -0.5, 0.0, 0
                 processes.append([j, process])
 
             for j, process in processes:
-                equivalent_widths[i, j, :] = process.get()[::-1]
+                row = process.get()[::-1]
+                #if np.all(np.isfinite(equivalent_widths)):
+                #    assert np.all(np.diff(equivalent_widths[::-1]) >= 0)
+    
+                equivalent_widths[i, j, :] = row
 
             pool.close()
             pool.join()

@@ -707,7 +707,7 @@ def balance(atomic_data_table, title=None):
 
     # [TODO]
     # Quote the slope on the axes.
-    logger.info("Slope on excitation balance plot: {0:.4f}".format(m))
+    #logger.info("Slope on excitation balance plot: {0:.4f}".format(m))
 
     # Plot the line strength axes
     reduced_equivalent_width = np.log(atomic_data_table["equivalent_width"]/atomic_data_table["wavelength"])
@@ -750,7 +750,7 @@ def balance(atomic_data_table, title=None):
 
     # Measure slopes by linear regression [TODO] and show them
 
-    logger.info("Slope on the reduced equivalent width plot: {0:.4f}".format(m))
+    #logger.info("Slope on the reduced equivalent width plot: {0:.4f}".format(m))
     x_limits = np.array(line_strength_ax.get_xlim())
     line_strength_ax.plot(x_limits, [np.mean(atomic_data_table["abundance"])] * 2,
         c="#666666", zorder=-1)
