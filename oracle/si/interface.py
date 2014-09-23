@@ -19,7 +19,7 @@ from string import ascii_letters
 from subprocess import PIPE, Popen
 from textwrap import dedent
 
-from . import io, utils
+from oracle.si import io, utils
 
 logger = logging.getLogger("oracle")
 
@@ -329,8 +329,8 @@ class instance(object):
             return (equivalent_width, synthetic_spectra, stdout)
         return equivalent_width
 
-
-    @utils.rounder(None, 0, 3, 3, 3, 3, 2)
+    @utils.limiting_transition
+    @utils.rounder(None, 0, 3, 3, 3, 3, 3)
     @utils.lru_cache(maxsize=128, typed=False)
     def synthesise_transition(self, teff, logg, metallicity, xi, abundance,
         surrounding=2, wavelength_steps=(0.10, 0.005, 1.5), full_output=False):
@@ -712,8 +712,6 @@ def equivalent_width(teff, logg, metallicity, xi, transition,
     return equivalent_widths[0] if single_call else np.array(equivalent_widths)
 
 
-@utils.rounder(0, 3, 3, 3, None, 3, 3, 3)
-@utils.lru_cache(maxsize=128, typed=False)
 def synthesise_transition(teff, logg, metallicity, xi, transition, abundance,
     surrounding=2, wavelength_steps=(0.10, 0.005, 1.5), full_output=False):
     """
@@ -787,6 +785,22 @@ def synthesise_transition(teff, logg, metallicity, xi, transition, abundance,
     if full_output:
         return (spectrum, equivalent_width, stdout)
     return spectrum
+
+
+def find_abundance(transition, effective_temperature, surface_gravity,
+    metallicity, xi, equivalent_width, tolerance=0.01, **kwargs):
+
+    with instance(transition=transition) as si:
+
+        def func(args):
+            abundance = args[0]
+            spectrum, returned_equivalent_width, stdout = si.synthesise_transition(
+                effective_temperature, surface_gravity, metallicity, xi, abundance,
+                full_output=True, **kwargs)
+            return equivalent_width - returned_equivalent_width
+        result = op.fsolve(func, 0., xtol=tolerance, factor=0.1)
+
+    return result[0]
 
 
 def abfind(teff, logg, metallicity, xi, transition, equivalent_width,
