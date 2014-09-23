@@ -16,6 +16,50 @@ from scipy.special import wofz
 
 logger = logging.getLogger("oracle")
 
+
+def invert_mask(mask, data=None, limits=(0, 10e5), padding=0):
+    """
+    Invert a mask to return regions that should be considered. If ``data`` are
+    provided then they will instruct on the wavelenth limits to be considered.
+    Otherwise, ``limits`` will be used.
+
+    :param mask:
+        The regions to mask.
+
+    :type mask:
+        :class:`numpy.ndarray`
+
+    :param data: [optional]
+        The observed spectra.
+
+    :type data:
+        list of :class:`oracle.specutils.Spectrum1D` objects
+
+    :param limits: [optional]
+        The wavelength limits to consider.
+
+    :type limits:
+        tuple
+    """
+
+    if data is not None:
+        limits = np.sort(np.array([[s.disp[0], s.disp[-1]] for s in data]).flatten())
+        limits = [np.min(limits), np.max(limits)]
+
+    points = []
+    points.extend(limits)
+    points.extend(mask.flatten())
+    points = np.sort(points)
+
+    # Find the start of the limts
+    i = points.searchsorted(limits)
+    inverted_mask = points[i[0] + (i[0] % 2):i[1] + (i[1] % 2)].reshape(-1, 2)
+    inverted_mask[:, 0] -= padding
+    inverted_mask[:, 1] += padding
+    return inverted_mask
+
+
+
 _CacheInfo = namedtuple("CacheInfo", ["hits", "misses", "maxsize", "currsize"])
 
 class _HashedSeq(list):

@@ -17,8 +17,8 @@ import numpy as np
 from scipy import optimize as op, stats
 from scipy.ndimage import gaussian_filter1d
 
-from oracle import si, specutils
-from .model import Model, _log_prior_eval_environment
+from oracle import si, specutils, utils
+from oracle.models.model import Model, _log_prior_eval_environment
 
 logger = logging.getLogger("oracle")
 
@@ -48,7 +48,7 @@ class GenerativeModel(Model):
 
         config = self.config
         any_channel_parameters = (config["model"]["continuum"] \
-            or config["model"]["doppler_broadening"])
+            or config["model"]["instrumental_broadening"])
         if any_channel_parameters and 0 >= self._num_observed_channels:
             raise ValueError("Cannot determine total number of model parameters"\
                 " until the model has been supplied some data. We have to give "\
@@ -79,9 +79,9 @@ class GenerativeModel(Model):
                     for j in range(num_channels_with_continuum)])
 
         # Any doppler broadening?
-        if config["model"]["doppler_broadening"]:
+        if config["model"]["instrumental_broadening"]:
             # [TODO] You idiot.
-            parameters.extend(["doppler_sigma_{0}".format(i) \
+            parameters.extend(["instrumental_resolution_{0}".format(i) \
                 for i in range(self._num_observed_channels)])
 
         # Any outlier parameters?
@@ -99,16 +99,15 @@ class GenerativeModel(Model):
         return parameters
 
 
-    def __call__(self, dispersion, synth_kwargs=None, **theta):
+    def __call__(self, data, synth_kwargs=None, **theta):
         """
         Generate data for the given :math:`\\theta`.
 
-        :param dispersion:
-            A list of two-length tuples containing the range of wavelengths to
-            synthesise.
+        :param data:
+            The observed spectra.
 
-        :type dispersion:
-            list 
+        :type data:
+            list of :class:`oracle.specutils.Spectrum1D` objects
 
         :param synth_kwargs: [optional]
             Keyword arguments to pass directly to :func:`si.synthesise`.
@@ -137,81 +136,88 @@ class GenerativeModel(Model):
         # [TODO] Redshift the *requested* synthesis range based on z in theta?
         missing_parameters = set(self.parameters).difference(theta)
         if len(missing_parameters) > 0:
-            logging.warn("Generate call is missing some theta parameters: {0}".format(
-                ", ".join(missing_parameters)))
+            logging.warn("Generate call is missing some theta parameters: {0}"\
+                .format(", ".join(missing_parameters)))
 
         if synth_kwargs is None:
             synth_kwargs = {}
 
         synth_kwargs["full_output"] = False
+        synth_kwargs["chunk"] = False
+        synth_kwargs["wavelength_steps"] = (0.05, 0.05, 0.05)
+        if "wavelength_steps" in synth_kwargs:
+            synth_kwargs.pop("wavelength_steps")
 
         # Request the wavelength step to be ~twice the observed pixel sampling.
         #if data is not None:f
         #    synth_kwargs.setdefault("wavelength_steps",
         #        [(0., np.min(np.diff(each.disp))/2., 0.) for each in data])
-            
-        synthesis_ranges = tuple([(each[0], each[-1]) for each in dispersion])
+        
+        # Synthesis ranges should contain only regions that are not masked out
+        synthesis_ranges = utils.invert_mask(self.config["mask"], data=data,
+            padding=0.05)
     
         # Synthesise the model spectra first (in parallel where applicable) and
         # then apply the cheap transformations in serial.
 
         # Note: Pass keyword arguments so that the cacher works.
-        model_spectra = si.synthesise(theta["teff"], theta["logg"], theta["[M/H]"], 
-            theta["xi"], wavelengths=synthesis_ranges, **synth_kwargs)
+        synthesised_spectra = si.synthesise(theta["teff"], theta["logg"], 
+            theta["[M/H]"], theta["xi"], wavelengths=synthesis_ranges, 
+            line_list_filename=self.config["GenerativeModel"]["line_list_filename"],
+            **synth_kwargs)
 
-        continuum_spectra = []
-        transformed_spectra = []
-        for i in range(len(model_spectra)):
+        model_spectra = []
+        for i, observed in enumerate(data):
+            model_contributions = np.zeros(len(observed.disp))
+            model_fluxes = np.ones(len(observed.disp))
 
-            model_spectrum = model_spectra[i].copy()
-            
-            # Apply macroturbulent, vsini and instrumental broadening to the
-            # spectrum.
-            # [TODO] For the moment we only have instrumental broadening.
-            kernel = theta.get("doppler_sigma_{0}".format(i), 0.)
-            if kernel > 0:
-                pixel_kernel = (kernel/(2 * (2*np.log(2))**0.5))/np.mean(np.diff(model_spectrum[:, 0]))
-                model_spectrum[:, 1] = gaussian_filter1d(model_spectrum[:, 1],
-                    pixel_kernel)
+            pixel_size = np.diff(observed.disp).mean()
+            for synthesised_spectrum in synthesised_spectra:
 
-            # Apply redshift corrections to the model spectra.
-            z = theta["z"] if "z" in theta else theta.get("z_{0}".format(i), 0)
-            model_spectrum[:, 0] *= (1. + z)
+                if  np.any(observed.disp[-1] > synthesised_spectrum[:, 0]) \
+                and np.any(observed.disp[0]  < synthesised_spectrum[:, 0]):
 
-            # Interpolate the new model spectra onto the observed pixels.
-            # We do this before transforming the continuum such that the
-            # continuum spectra (if it is returned with return_continuum)
-            # will always be on the same dispersion map as the returned
-            # spectra.
-            if len(dispersion[i]) > 2:
-                expected = np.interp(dispersion[i], model_spectrum[:, 0],
-                    model_spectrum[:, 1], left=np.nan, right=np.nan)
+                    spectral_portion = synthesised_spectrum.copy()
 
-                if not np.any(np.isfinite(expected)):
-                    raise si.SIException("only nans")
+                    # Apply instrumental broadening
+                    resolution = theta.get("instrumental_resolution_{0}".format(i), 0)
+                    if resolution > 0:
+                        pixel_kernel = (spectral_portion[:,0].mean()/resolution)\
+                            /(2.3548200450309493*pixel_size)
 
-                model_spectrum = np.vstack([dispersion[i], expected]).T
+                        spectral_portion[:, 1] = gaussian_filter1d(
+                            spectral_portion[:, 1], pixel_kernel)
 
-            # Apply continuum transformation to the model spectra.
+                    # Apply any redshift
+                    z = theta["z"] if "z" in theta else theta.get("z_{0}".format(i), 0)
+                    spectral_portion[:, 0] *= (1. + z)
+
+                    # Put on the observed pixels
+                    indices = observed.disp.searchsorted(spectral_portion[[0, -1], 0])
+                    if np.ptp(indices) > 0:
+                        model_contributions[indices[0]:indices[-1]] += 1
+                        disp = observed.disp[indices[0]:indices[-1]]
+
+                        model_fluxes[indices[0]:indices[1]] *= \
+                            np.interp(disp, spectral_portion[:, 0],
+                                spectral_portion[:, 1], left=1., right=1.)
+
+            # Set nans for the places we did not synthesise
+            model_fluxes[model_contributions == 0] = np.nan
+
+            # Apply continuum
             j, coefficients = 0, []
             while "c_{0}_{1}".format(i, j) in theta:
                 coefficients.append(theta["c_{0}_{1}".format(i, j)])
                 j += 1
 
             if len(coefficients) > 0:
-                continuum_spectra.append(np.polyval(coefficients, model_spectrum[:, 0]))
-                model_spectrum[:, 1] *= continuum_spectra[-1]
+                model_fluxes[:, 1] *= np.polyval(coefficients, observed.disp)
 
-            else:
-                # No continuum for this order. Fill it with a None to maintain
-                # order.
-                continuum_spectra.append(None)
+            model_spectrum = np.vstack([observed.disp, model_fluxes]).T
+            model_spectra.append(model_spectrum)
 
-            transformed_spectra.append(model_spectrum)
-
-        #if return_continuum:
-        #    return (model_spectra, continuum_spectra)
-        return transformed_spectra
+        return model_spectra
 
 
     def initial_guess(self, data, synth_kwargs=None):
@@ -313,9 +319,11 @@ class GenerativeModel(Model):
         remaining_parameters = set(self.parameters).difference(parameter_guess.keys())
 
         # OK, what about parameter stubs
+        # TODO No!!
         default_rule_stubs = collections.OrderedDict([
-            ("doppler_sigma_", "0.20")
+            ("instrumental_resolution_", "28000")
         ])
+
 
         for parameter in remaining_parameters:
             for parameter_stub, rule in default_rule_stubs.iteritems():
@@ -416,7 +424,7 @@ class GenerativeModel(Model):
 
         # Put in priors for channel stubs
         for i in range(self._num_observed_channels):
-            if 0 > theta_dict.get("doppler_sigma_{0}".format(i), 1):
+            if 0 > theta_dict.get("instrumental_resolution_{0}".format(i), 1):
                 return -np.inf
         
         ln_prior = 0
@@ -457,8 +465,7 @@ class GenerativeModel(Model):
 
         theta_dict = dict(zip(self.parameters, theta))
         try:
-            expected = self(dispersion=[spectrum.disp for spectrum in data],
-                synth_kwargs=synth_kwargs, **theta_dict)
+            expected = self(data, synth_kwargs=synth_kwargs, **theta_dict)
 
         except si.SIException:
             # Probably unrealistic astrophysical parameters requested.
@@ -716,13 +723,15 @@ class GenerativeModel(Model):
             lambda theta, data, skw: -self._log_probability(theta, data, skw),
             [initial_theta.get(parameter) for parameter in self.parameters],
             args=(data, synth_kwargs), **op_kwargs)
-        """
+        
         op_kwargs = {
-            "maxiter": maxiter,
-            "epsilon": np.array([10, 0.1, 0.1, 0.1]),
-            "norm": -np.inf,
-            "gtol": 1e-8
+            #"maxiter": maxiter,
+            #"epsilon": np.array([10, 0.1, 0.1, 0.1]),
+            #"norm": -np.inf,
+            #"gtol": 1e-8
+            t
         }
+        """
         #op.fmin_bfgs(f, x0, fprime=None, args=(), gtol=1e-05, norm=inf, epsilon=1.4901161193847656e-08, maxiter=None, full_output=0, disp=1, retall=0, callback=None)
         
 
@@ -731,10 +740,10 @@ class GenerativeModel(Model):
         def min_func(theta, data, skw):
             nlp = -self._log_probability(theta, data, skw)
             #return nlp
-            return nlp if np.isfinite(nlp) else 1e3
+            return nlp
 
-        result = op.fmin_cg(
-            min_func,
+        result = op.fmin(
+            lambda t, d, skw: -self._log_probability(t, d, skw),
             [initial_theta.get(parameter) for parameter in self.parameters],
             args=(data, synth_kwargs), **op_kwargs)
         result = op_theta, op_fopt, op_gopt, op_Bopt, op_nfunc, op_ngrad, warnflag

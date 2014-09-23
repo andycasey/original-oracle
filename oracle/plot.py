@@ -38,6 +38,9 @@ def transition(data, model, synthetic_spectra, wavelength, data_color="#000000",
     indices = data.disp.searchsorted([wavelength - 2, wavelength + 2])
     disp, flux = data.disp.__getslice__(*indices), data.flux.__getslice__(*indices)
     mask = model.mask(disp, 0.) # TODO
+
+    # TODO: CHANGE TO CONTINUUM
+    ax.plot([disp[0], disp[-1]], [1, 1], c="k", zorder=-1)
     ax.plot(disp, flux, "-.", c=data_color)
     ax.plot(disp, flux * mask, "-", c=data_color)
 
@@ -50,10 +53,12 @@ def transition(data, model, synthetic_spectra, wavelength, data_color="#000000",
     if title is not None:
         ax.set_title(title)
 
+    ax.set_ylim(0, 1.1)
     ax.set_xlim(wavelength - 1, wavelength + 1)
     
     ax.xaxis.set_major_locator(LinearLocator(5))
-    xticks = np.arange(wavelength - 1.5, wavelength + 1.5, 0.5)
+    xticks = np.arange(wavelength - 1.0, wavelength + 1.5, 0.5)
+    ax.set_xticks(xticks)
     ax.set_xticklabels(["{0:.2f}".format(each) for each in xticks])
 
     ax.set_xlabel("Wavelength [$\AA$]")
@@ -222,7 +227,7 @@ def spectrum_comparison(data, model, theta=None, model_spectra=None, figsize=Non
         :class:`matplotlib.Figure`
     """
 
-    if isinstance(data, specutils.Spectrum1D):
+    if not isinstance(data, (tuple, list)):
         data = [data]
 
     K = len(data)
@@ -237,10 +242,9 @@ def spectrum_comparison(data, model, theta=None, model_spectra=None, figsize=Non
         synth_kwargs = {}
 
     if model_spectra is None:
-        model_spectra = model(dispersion=[s.disp for s in data], 
-            synth_kwargs=synth_kwargs, **theta)
+        model_spectra = model(data, synth_kwargs=synth_kwargs, **theta)
 
-    if not isinstance(model_spectra, list):
+    if not isinstance(model_spectra, (list, tuple)):
         model_spectra = [model_spectra]
 
     fig, axes = plt.subplots(K, figsize=figsize)

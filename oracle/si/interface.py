@@ -413,27 +413,26 @@ class instance(object):
             abundances={utils.element(transition["atomic_number"]): abundance},
             full_output=True)
 
-        # Parse the equivalent width from the SI standard output
-        stdout_split = stdout.split("\n")
-
         if " No line center within interval" in stdout:
             logging.warn("No line center synthesised for transition at {0:.2f} A"\
                 " with [{1}/H] = {2:.2f}. Line is either too weak or not in the "\
                 "provided line list.".format(transition["wavelength"], 
                     utils.element(transition["atomic_number"]), abundance))
+            equivalent_width = 0
 
-        # Let's go backwards, it will be faster:
-        for line in stdout_split[::-1]:
-            if line.startswith(" equivalent width: "):
-                equivalent_width = float(line.strip().split()[2])
-
-                if not np.isfinite(equivalent_width):
-                    equivalent_width = 0
-                break
-        
         else:
-            raise ValueError("No equivalent width found for transition at"\
-                " {0:.2f} Angstroms".format(transition["wavelength"]))
+            # Parse the equivalent width from the SI standard output
+            # Let's go backwards, it will be faster:
+            stdout_split = stdout.split("\n")
+            for line in stdout_split[::-1]:
+                if line.startswith(" equivalent width: "):
+                    equivalent_width = float(line.strip().split()[2])
+                    if not np.isfinite(equivalent_width):
+                        equivalent_width = 0
+                    break
+            else:
+                raise ValueError("No equivalent width found for transition at"\
+                    " {0:.2f} Angstroms".format(transition["wavelength"]))
 
         if full_output:
             return (spectrum, equivalent_width, stdout)
@@ -908,7 +907,7 @@ def synthesise(teff, logg, metallicity, xi, wavelengths, wavelength_steps=(0.10,
         # wavelength steps.
         if isinstance(wavelength_steps[0], (int, float)):
             wavelength_steps = [wavelength_steps] * len(wavelengths)
-    
+
     # Check number of threads to use.
     threads = [threads, mp.cpu_count()][threads < 0]
     

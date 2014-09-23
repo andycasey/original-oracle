@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html class="login-bg">
+<head>
+  <title>Detail Admin - Sign in</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+    <!-- bootstrap -->
+    <link href="static/css/bootstrap/bootstrap.css" rel="stylesheet" />
+    <link href="static/css/bootstrap/bootstrap-overrides.css" type="text/css" rel="stylesheet" />
+
+    <!-- global styles -->
+    <link rel="stylesheet" type="text/css" href="static/css/compiled/layout.css" />
+    <link rel="stylesheet" type="text/css" href="static/css/compiled/elements.css" />
+    <link rel="stylesheet" type="text/css" href="static/css/compiled/icons.css" />
+
+    <!-- libraries -->
+    <link rel="stylesheet" type="text/css" href="static/css/lib/font-awesome.css" />
+    
+    <!-- this page specific styles -->
+    <link rel="stylesheet" href="static/css/compiled/signin.css" type="text/css" media="screen" />
+
+    <!-- open sans font -->
+    <link href='http://fonts.googleapis.com/css?family=Open+Sans:300italic,400italic,700italic,800italic,400,300,600,700,800' rel='stylesheet' type='text/css' />
+
+    <!--[if lt IE 9]>
+      <script src="http://html5shim.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+</head>
+<body>
+
+
+    <div class="login-wrapper">
+        <a href="index.html">
+            <img class="logo" src="static/img/logo-white.png" alt="logo" />
+        </a>
+
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            {% for message in messages %}
+              <div class="alert alert-warning fade in">
+                <a class="close" data-dismiss="alert">&times;</a>
+                {{ message }}
+              </div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+
+    </div>
+
+  <!-- scripts -->
+    <script src="http://code.jquery.com/jquery-latest.js"></script>
+    <script src="static/js/bootstrap.min.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,24 @@
+{% extends 'layouts/form.html' %}
+{% block title %}Login{% endblock %}
+{% block content %}
+
+<div class="box">
+    <div class="content-wrap">
+        <h6>Log in</h6>
+        <input class="form-control" type="text" placeholder="E-mail address">
+        <input class="form-control" type="password" placeholder="Your password">
+        <a href="#" class="forgot">Forgot password?</a>
+        <div class="remember">
+            <input id="remember-me" type="checkbox">
+            <label for="remember-me">Remember me</label>
+        </div>
+        <a class="btn-glow primary login" href="index.html">Log in</a>
+    </div>
+</div>
+
+<div class="no-account">
+    <p>Don't have an account?</p>
+    <a href="signup.html">Sign up</a>
+</div>   
+
+{% endblock %}
