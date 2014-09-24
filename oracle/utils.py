@@ -252,22 +252,34 @@ def rounder(*decimals, **decimal_kwargs):
     return decorator
 
 
+
+#        return ("teff", "xi", "logg", "[M/H]")
+# teff, logg, xi, [M/H]
+
 def stellar_jacobian(stellar_parameters, *args):
     """ Approximate the Jacobian of the stellar parameters and
     minimisation parameters, based on calculations from the Sun """
 
     logger.info("Updating approximation of Jacobian matrix for stellar parameter determination")
 
+    """"
     teff, vt, logg, feh = stellar_parameters[:4]
-
-    # This is the black magic.
-    full_jacobian = np.array([
+    original_jacobian = np.array([
         [ 5.4393e-08*teff - 4.8623e-04, -7.2560e-02*vt + 1.2853e-01,  1.6258e-02*logg - 8.2654e-02,  1.0897e-02*feh - 2.3837e-02],
         [ 4.2613e-08*teff - 4.2039e-04, -4.3985e-01*vt + 8.0592e-02, -5.7948e-02*logg - 1.2402e-01, -1.1533e-01*feh - 9.2341e-02],
         [-3.2710e-07*teff + 2.8178e-03,  3.8185e-02*vt - 1.6601e-01, -1.2006e-01*logg - 3.5816e-02, -2.8592e-04*feh + 1.4257e-02],
         [-1.7822e-07*teff + 1.8250e-03,  3.5564e-01*vt - 1.1024e-00, -1.2114e-01*logg + 4.1779e-01, -1.8847e-01*feh - 1.0949e-00]
     ])
-    return full_jacobian.T
+    """
+
+    teff, logg, feh, vt = stellar_parameters[:4]
+    # This is total black magic. Like, wizard style.
+    return np.array([
+        [+5.4393e-08*teff - 4.8623e-04, +1.6258e-02*logg - 8.2654e-02, +1.0897e-02*feh - 2.3837e-02, -7.2560e-02*vt + 1.2853e-01],
+        [+4.2613e-08*teff - 4.2039e-04, -5.7948e-02*logg - 1.2402e-01, -1.1533e-01*feh - 9.2341e-02, -4.3985e-01*vt + 8.0592e-02],
+        [-3.2710e-07*teff + 2.8178e-03, -1.2006e-01*logg - 3.5816e-02, -2.8592e-04*feh + 1.4257e-02, +3.8185e-02*vt - 1.6601e-01],
+        [-1.7822e-07*teff + 1.8250e-03, -1.2114e-01*logg + 4.1779e-01, -1.8847e-01*feh - 1.0949e-00, +3.5564e-01*vt - 1.1024e-00]
+    ]).T
 
 
 def reflect_about(a, limits):

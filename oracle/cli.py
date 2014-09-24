@@ -26,6 +26,22 @@ image_path = lambda s, args: os.path.abspath(os.path.expanduser(s.format(
 
 logger = logging.getLogger("oracle")
 
+
+def _check_plot_format(args):
+    """ If plotting is enabled, this checks that the requested plot format is
+    actually available on this system. """
+
+    if args.plotting:
+        fig = plt.figure()
+        available = map(str.lower, fig.canvas.get_supported_filetypes().keys())
+        plt.close(fig)
+
+        if args.plot_fmt.lower() not in available:
+            raise ValueError("Plotting format {0} is not available on this "\
+                "system. Available formats are: {1}".format(args.plot_fmt.lower(),
+                    ", ".join(available)))
+    return True
+
 def _check_for_existing_files(args):
     """ Create a list of files that the argument parser will create then check
     to see if those files already exist. """
@@ -118,88 +134,33 @@ def solve_generative(args):
     raise a
 
 
-def infer_classical(args):
-    """ Perform inference on the classical model """
+def solve_theremin(args):
+    """ The-not-ere-min solver """
 
     t_init = time()
-
-    # Create the model and load the data
-    data = map(specutils.Spectrum.load, args.spectra_filenames)
-    data.sort(key=lambda spectrum: spectrum.disp.mean())
-
-    model = models.StellarSpectrum(args.config_filename, data)
-
-    # Optimise the individual channel parameters
-    optimised_model_parameters = model.optimise(data)
-
-    # Plot the spectrum
-    if args.plotting:
-        path = image_path("{0}-optimised.{1}", args)
-
-        model_spectra = [c(s.disp, **theta) for c, s, theta in \
-            zip(model.channels, data, optimised_model_parameters)]
-        fig = plot.spectrum_comparison(data, model, model_spectra=model_spectra)
-        fig.savefig(path)
-        logger.info("Saved figure to {0}".format(path))
-        plt.close(fig)
-
-    # Infer the channel parameters
-    inferred_model_parameters = model.infer(data, optimised_model_parameters)
     
-    # Plot the inferred spectrum with uncertainties, etc.
-    if args.plotting:
-        for i, (channel, result) in enumerate(zip(model.channels, inferred_model_parameters)):
-            # Plot the spectrum projection.
-            path = image_path("{0}-inferred-model-" + str(i) + ".{1}", args)
-            fig = plot.projection(result[1], channel, [data[i]], n=100)
-            fig.savefig(path)
-            plt.close(fig)
-            logger.info("Saved projection figure to {0}".format(path))
+    data = map(theremin.specutils.Spectrum1D.load, args.spectra_filenames)
+    data.sort(key=lambda s: s.disp[0])
 
-            # Plot the chains.
-            path = image_path("{0}-chains-" + str(i) + ".{1}", args)
-            fig = plot.chains(result[2]["chain"], labels=channel.parameters)
-            fig.savefig(path)
-            plt.close(fig)
-            logger.info("Saved chain figure to {0}".format(path))
+    model = theremin.ThereminModel(args.config_filename)
 
-            # Plot the autocorrelation
-            path = image_path("{0}-acor-" + str(i) + ".{1}", args)
-            fig = plot.autocorrelation(result[2]["chain"], burn_in=1000, labels=channel.parameters)
-            fig.savefig(path)
-            plt.close(fig)
-            logger.info("Saved autocorrelation figure to {0}".format(path))
+    # Optimise the model parameters and plot the transition fits at every 10th
+    # iteration of stellar parameters
+    parameters, state, converged, transitions, spectra = model.optimise(data,
+      plotting=True, plot_transition_frequency=10,
+      plot_filename_prefix=args.output_prefix)
 
+    if converged:
+        # Do something with the results?
+        print("Star {0} has converged with {1} and state {2}".format(benchmark, 
+            parameters, state))
+
+    else:
+        print("Did not converge. Final parameters tried were {0} with state {1}"
+            .format(parameters, state))
 
     raise a
 
-
-    # Integrate the line profiles (with uncertainties) and optimise stellar parameters
-    atomic_data = model.integrate_profiles([each[0] for each in inferred_model_parameters])
-
-    raise a
-
-    op_x, op_atomic_data, op_converged = model.optimise_stellar_parameters(
-        atomic_data, full_output=True, 
-        ftol=model.config["classical"].get("tolerance", 4e-3),
-        maxiter=model.config["classical"].get("maxiter", 3))
-
-
-    if args.plotting:
-        path = image_path("{0}-inferred-balance.{1}", args)
-
-        title = "$T_{\\rm eff} = "
-        fig = plot.balance(op_atomic_data)
-        fig.savefig(path)
-        logger.info("Saved figure to {0}".format(path))
-        plt.close(fig)
-
-
-    #import triangle
-    #fig = plot.projection(moobar[1], model.channels[0], [data[0]], n=1000,
-    #    figsize=(25,4), plot_uncertainties=True)
-    #plt.show()
-    #raise a
 
 
 def solve_classical(args):
@@ -258,8 +219,10 @@ def solve_classical(args):
     logger.info("Fin.")
 
 
-
 def solve(args):
+
+    # Check availability of plotting format
+    _check_plot_format()
 
     # Before doing heaps of analysis, look to see if we intend to create some
     # files and if those files already exist -- and we have been told not to 
@@ -273,31 +236,15 @@ def solve(args):
     elif args.analysis_type == "classical":
         solve_classical(args)
 
+    elif args.analysis_type == "theremin":
+        solve_theremin(args)
+
     else:
         raise NotImplementedError("how did you get here?")
-
 
 
 def infer(args):
-
-    # Before doing heaps of analysis, look to see if we intend to create some
-    # files and if those files already exist -- and we have been told not to 
-    # clobber them -- then we should raise an exception now before doing any
-    # real work
-    _check_for_existing_files(args)
-
-    if args.analysis_type == "generative":
-        infer_generative(args)
-
-    elif args.analysis_type == "classical":
-        infer_classical(args)
-
-    else:
-        raise NotImplementedError("how did you get here?")
-
-
-
-
+    raise NotImplementedError("let's focus on optimisation first")
 
 
 
@@ -339,7 +286,7 @@ def main():
         help="Numerically optimise the model parameters, given the data.")
 
     solve_parser.add_argument("analysis_type", type=str,
-        choices=("generative", "classical"),
+        choices=("generative", "classical", "theremin"),
         help="The kind of analysis to perform. Available options are: classical"\
         " or generative (default: %(default)s).")
 
@@ -361,8 +308,7 @@ def main():
 
     solve_parser.add_argument("--plot-format", "-pf", dest="plot_fmt",
         action="store", type=str, default="pdf", help="Format for output plots "\
-        "(default: %(default)s). Available formats are (case insensitive):"
-        " PDF, JPG, PNG, EPS")
+        "(default: %(default)s)")
     solve_parser.set_defaults(func=solve)
 
 

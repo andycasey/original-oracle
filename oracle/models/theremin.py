@@ -27,10 +27,19 @@ from oracle.models import Model, line
 logger = logging.getLogger("oracle")
 
 
-class ConvergenceAchieved(Exception):
+class ConvergenceAchieved(BaseException):
     pass
 
 class ThereminModel(Model):
+
+    _default_constraints = [
+        "equivalent_width > 5", # mA 
+        "150 >= equivalent_width", # mA
+        "warnflag == 0",
+        # Avoid the Balmer lines
+        "np.abs(wavelength - 6563) > 100",
+        "np.abs(wavelength - 4861) > 100"
+    ]
 
     def __init__(self, configuration):
         """
@@ -58,7 +67,7 @@ class ThereminModel(Model):
         Return the parameters of the model.
         """
 
-        return ("teff", "xi", "logg", "[M/H]")
+        return ("teff", "logg", "[M/H]", "xi")
 
     def __call__(self, **theta):
 
@@ -98,9 +107,10 @@ class ThereminModel(Model):
         return [parameter_guess[p] for p in self.parameters]
 
 
-    def _apply_constraints(self, abundance_data, constraints):
+    def _apply_constraints(self, abundance_data, constraints=None):
 
-        acceptable = np.ones(len(abundance_data), dtype=bool)
+        # A default constraint:
+        acceptable = np.isfinite(abundance_data["abundance"])
         if constraints is None or len(constraints) == 0:
             return acceptable
 
@@ -115,13 +125,10 @@ class ThereminModel(Model):
         for constraint in constraints:
             acceptable *= eval(constraint, environment)
 
-        # Default constraint:
-        acceptable *= np.isfinite(abundance_data["abundance"])
-
         return acceptable
 
 
-    def _slopes(self, transitions, metallicity):
+    def _excitation_ionisation_state(self, transitions, metallicity):
 
         # Excitation
         exc_slope, exc_offset = line.fit(
@@ -150,7 +157,179 @@ class ThereminModel(Model):
         return np.array([exc_slope, lst_slope, ionisation_state, metallicity_state])
 
 
-    def optimise(self, data, initial_theta=None, constraints=None, update_blended_interval=1,
+    def optimise(self, data, initial_theta=None, constraints=None,
+        tolerance=[1e-3, 1e-3, 1e-3, 1e-3], op_kwds=None, plotting=True,
+        full_output=True, **kwargs):
+        """
+        Optimise the model parameters given some data.
+
+        :param data:
+            The observed stellar spectra.
+
+        :type data:
+            list of :class:`specutils.Spectrum1D` objects
+
+        :param constraints: [optional]
+            Data quality constraints to apply to the transitions used for stellar
+            parameter determination.
+
+        :type constraints:
+            list
+        """
+
+        t_init = time()
+        plot_filename_prefix = kwargs.pop("plot_filename_prefix", "opt")
+        # A frequency of zero means it won't plot the transitions at each
+        # iteration of stellar parameters
+        plot_transition_frequency = max([0, kwargs.pop("plot_transition_frequency", 0)])
+
+        invalid_response = np.array([np.inf]*4)
+        if initial_theta is None:
+            initial_theta = self.initial_guess()
+
+        if constraints is None:
+            constraints = self._default_constraints
+            
+        # Some dumb-user (e.g., self-) checking
+        assert np.all(np.array(tolerance) > 0), "Tolerance values must be positive"\
+            " and absolute."
+        assert len(initial_theta) == len(self.parameters)
+
+        logger.info("Initial stellar parameters: Teff = {0:.0f} K, log(g) = "\
+            "{2:.3f}, [M/H] = {3:.3f}, xi = {1:.3f} km/s".format(*initial_theta))
+
+        # At each stellar parameter test we need to re-fit all the lines
+        # So we need another model class.
+        model = SpectrumModel(self.config, data)
+
+        global iteration_counts
+        iteration_counts = [-1]
+        @utils.rounder(0, 3, 3, 3)
+        @utils.lru_cache(maxsize=25, typed=False)
+        def do_balance(*args):
+
+            # Check for a full output
+            args = list(args)
+            full_output = args.pop(-1) if len(args) == len(self.parameters) + 1 else False
+
+            t_a = time()
+            global iteration_counts
+            iteration_counts[0] += 1
+
+            logger.info("Performing balance for {0} (iteration #{1})".format(
+                args, iteration_counts[0]))
+
+            # Optimise the model parameters given some set of stellar parameters
+            transitions, spectra = model.optimise(*args, full_output=True)
+
+            # Apply constraints
+            ok = self._apply_constraints(transitions, constraints)
+
+            # Calculate first order derivatives
+            teff, logg, metallicity, xi = args
+            state = self._excitation_ionisation_state(transitions[ok], metallicity)
+
+            # Should we make some plots?
+            if plotting:
+                fig = plot_balance(transitions[ok], title="$T_{{\\rm eff}}$ = "\
+                    "{0:.0f} K, log(g) = {1:.3f}, [M/H] = {2:.3f} $\\xi$ = "\
+                    "{3:.3f} km/s".format(*args))
+                fig.savefig("{0}-iter{1}-state.png".format(plot_filename_prefix,
+                    iteration_counts[0]))
+                plt.close(fig)
+
+                # Have we reached the right plotting transition frequency
+                # (by iteration), or is it the first iteration?
+                if (plot_transition_frequency > 0 and \
+                    (iteration_counts[0] % plot_transition_frequency) == 0) \
+                or iteration_counts[0] == 0:
+                    # Plot the transitions 
+
+                    logger.info("Plotting transition fits...")
+                    for i, (transition, spectrum) in enumerate(zip(transitions, spectra)):
+
+                        # Which data index is the transition in?
+                        data_index = model._get_data_index(i)
+
+                        path = "{0}-iter{1}-fit-{2:.2f}.png".format(
+                            plot_filename_prefix, iteration_counts[0],
+                            transition["wavelength"])
+                        fig = plot_transition(data[data_index], self, spectrum, 
+                            transition["wavelength"], title="$\chi^2 = {0:.2f}$, R={7:.0f}, [{1} "\
+                            "{2:.0f} @ {3:.2f}/H] = {4:.2f}, $EW = {5:.2f} m\AA$ ({6})".format(
+                                transition["chi_sq"], 
+                                utils.element(transition["atomic_number"]),
+                                transition["ionised"],
+                                transition["wavelength"],
+                                transition["abundance"],
+                                transition["equivalent_width"],
+                                ["REJECTED", "ACCEPTED"][ok[i]], transition["instrumental_resolution"]))
+                        fig.savefig(path)
+                        logger.info("Created image {0}".format(path))
+                        plt.close(fig)
+
+            if np.all(np.less_equal(np.abs(state), tolerance)):
+                if full_output:
+                    return (state, transitions, spectra)
+                raise ConvergenceAchieved(args, state)
+
+            logger.info("State for {0} is {1} and took {2:.2f} seconds".format(
+                args, state, time() - t_a))
+
+            if full_output:
+                return (state, transitions, spectra)
+
+            return state
+
+        op_kwds = {
+            "col_deriv": 1,
+            "epsfcn": 0,
+            "xtol": 1e-16,
+            "maxfev": 50,
+            "fprime": utils.stellar_jacobian,
+            "full_output": True # Necessary for introspection and provenance.
+        }
+        if op_kwds is not None:
+            op_kwds.update(op_kwds)
+
+        try:
+            opt, infodict, ier, mesg = op.fsolve(lambda a: do_balance(*tuple(a)),
+                initial_theta, **op_kwds)
+
+        except ConvergenceAchieved as (opt, state):
+            # Woo hoo!
+            # Should we plot transitions?
+            logger.info("Convergence achieved. Optimised stellar parameters are"\
+                " Teff = {0:.0f} K, logg = {1:.3f}, [M/H] = {2:.3f}, xi = {3:.3f}"\
+                " km/s".format(*opt))
+            logger.info("State tolerance was: {0}".format(state))
+
+            # Since we don't have infodict, etc, let's just make them up.
+            converged, ier, infodict = True, 0, {}
+            mesg = "Convergence achieved after {0} iterations".format(iteration_counts[0])
+            if full_output:
+                opt_with_full_output = list(opt) + [True]
+                state, transitions, spectra = do_balance(*opt_with_full_output)
+
+        except:
+            # We should catch these and re-raise during debugging.
+            raise
+
+        else:
+            # Should we try again?
+            logger.warn("Convergence not achieved: {0}".format(mesg.replace("\n", "")))
+
+            converged = False
+            if full_output:
+                opt_with_full_output = list(opt) + [True]
+                state, transitions, spectra = do_balance(*opt_with_full_output)
+            
+        if full_output:
+            return (opt, state, converged, transitions, spectra)
+        return (opt, state, converged)
+
+
+    def faster_optimise(self, data, initial_theta=None, constraints=None, update_blended_interval=1,
         plot_transitions=True, plot_filename_prefix="transition-"):
         """
         Optimise the model parameters given some data.
@@ -283,12 +462,7 @@ class ThereminModel(Model):
             fig.savefig("balance.png")
             plt.close(fig)
 
-            bad = np.where(transitions[ok]["abundance"] < -4)[0]
-            for each in bad:
-                print(transitions[ok][each]["wavelength"], "bad")
-                raise a
-
-            state = self._slopes(transitions[ok], metallicity)
+            state = self._excitation_ionisation_state(transitions[ok], metallicity)
             if np.all(np.less_equal(np.abs(state), [1e-3, 1e-3, 1e-3, 1e-3])):
                 raise ConvergenceAchieved(state)
 
@@ -596,14 +770,14 @@ class SpectrumModel(Model):
         return data_index
 
 
-    def initial_guess(self, effective_temperature, surface_gravity, metallicity,
+    def d(self, effective_temperature, surface_gravity, metallicity,
         xi, resolution=25000):
         """
         Provide an initial guess of all the SpectrumModel model parameters
         given some stellar parameters.
         """
 
-        initial_guess = {}
+        d = {}
         synthesis_required = \
             (self.config["model"]["redshift"] or self.config["model"]["continuum"])
 
@@ -1020,6 +1194,7 @@ class SpectrumModel(Model):
             dict
         """
 
+
         if initial_guess is None:
             if use_previously_optimised and self._optimised_theta is not None:
                 logger.info("Using previously optimised theta as initial guess:"\
@@ -1027,8 +1202,10 @@ class SpectrumModel(Model):
                 initial_theta = self._optimised_theta
 
             else:
-                initial_theta = self.initial_guess(effective_temperature,
-                    surface_gravity, metallicity, xi)
+                initial_theta = {}
+                logger.warn("Remember that this bit is here because I'm not 100%"\
+                    " sure whether it's necessary or not.")
+
 
         # Create the final dictionary result
         optimal_theta = {}

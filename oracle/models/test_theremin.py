@@ -314,6 +314,9 @@ config = {
 
 benchmarks = [each.split("/")[-2] for each in glob("../tests/data/benchmarks/*/*blue_noresample.txt")]
 
+
+from oracle.models import theremin
+
 for benchmark in benchmarks:
 
     filenames = glob("../tests/data/benchmarks/{0}/{0}_narval*noresample*".format(benchmark))
@@ -323,7 +326,10 @@ for benchmark in benchmarks:
     model = theremin.ThereminModel(config)
     #spectrum_model = theremin.SpectrumModel(config, data)
 
-    parameters, converged, transitions, spectra = model.optimise(data, plot_transitions=True)
+    # Optimise the model parameters and plot the transition fits at every 10th
+    # iteration of stellar parameters
+    parameters, state, converged, transitions, spectra = model.optimise(data,
+      plotting=True, plot_transition_frequency=10, plot_filename_prefix=benchmark)
 
     if converged:
         # Do something with the results?
