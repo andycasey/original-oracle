@@ -245,8 +245,8 @@ class ThereminModel(Model):
                 # Have we reached the right plotting transition frequency
                 # (by iteration), or is it the first iteration?
                 if (plot_transition_frequency > 0 and \
-                    (iteration_counts[0] % plot_transition_frequency) == 0) \
-                or iteration_counts[0] == 0:
+                    (iteration % plot_transition_frequency) == 0) \
+                or iteration == 0:
                     # Plot the transitions 
 
                     logger.info("Plotting transition fits...")
