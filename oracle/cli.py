@@ -145,7 +145,7 @@ def solve_theremin(data, args):
     model = oracle.models.ThereminModel(args.config_filename)
 
     # We cannot plot in forked processes.
-    plotting = args.plotting if args.thread > 1 else False
+    plotting = args.plotting if args.threads > 1 else False
 
     # Optimise the model parameters and plot the transition fits at every 10th
     # iteration of stellar parameters
