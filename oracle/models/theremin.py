@@ -294,6 +294,12 @@ class ThereminModel(Model):
                     logger.info("Plotting transition fits...")
                     for i, (transition, spectrum) in enumerate(zip(transitions, spectra)):
 
+                        if spectrum is None:
+                            logger.warn("Skipping plot for transition at {0} because"\
+                                " it could not be synthesised.".format(
+                                    transition["wavelength"]))
+                            continue
+
                         # Which data index is the transition in?
                         data_index = model._get_data_index(i)
 
@@ -1242,8 +1248,11 @@ class SpectrumModel(Model):
                 wavelength))
         xopt = xopt.reshape(-1)
 
-        #xopt, r_chi_sq, equivalent_width, spectrum = result
-        r_chi_sq, equivalent_width, spectrum = chi_sq(xopt, True)[1:]
+        if fopt != invalid_response:
+            r_chi_sq, equivalent_width, spectrum = chi_sq(xopt, True)[1:]    
+        else:
+            r_chi_sq, equivalent_width, spectrum = (np.nan, 0, None)
+
         result = [xopt, r_chi_sq, equivalent_width, spectrum]
 
         if full_output:
