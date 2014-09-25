@@ -195,6 +195,8 @@ class ThereminModel(Model):
             " and absolute."
         assert len(initial_theta) == len(self.parameters)
 
+        logger.info("Performing excitation and ionisation balance with absolute"\
+            "tolerance: {0}".format(tolerance))
         logger.info("Initial stellar parameters: Teff = {0:.0f} K, log(g) = "\
             "{1:.3f}, [M/H] = {2:.3f}, xi = {3:.3f} km/s".format(*initial_theta))
 
@@ -309,7 +311,7 @@ class ThereminModel(Model):
 
             # Since we don't have infodict, etc, let's just make them up.
             converged, ier, infodict = True, 0, {}
-            mesg = "Convergence achieved after {0} iterations".format(iteration_counts[0])
+            mesg = "Convergence achieved after {0} iterations".format(len(sampled_parameters))
             if full_output:
                 opt_with_full_output = list(opt) + [True]
                 state, transitions, spectra = do_balance(*opt_with_full_output)
@@ -326,7 +328,12 @@ class ThereminModel(Model):
             if full_output:
                 opt_with_full_output = list(opt) + [True]
                 state, transitions, spectra = do_balance(*opt_with_full_output)
-            
+        
+        info = {
+            "niterations": len(sampled_parameters) - 1
+        }
+
+
         if full_output:
             return (opt, state, converged, transitions, spectra, sampled_parameters,
                 parameter_states)

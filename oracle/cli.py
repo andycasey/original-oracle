@@ -146,9 +146,11 @@ def solve_theremin(data, args):
 
     # Optimise the model parameters and plot the transition fits at every 10th
     # iteration of stellar parameters
-    parameters, state, converged, transitions, spectra = model.optimise(data,
+    result = model.optimise(data,
         plotting=True, plot_transition_frequency=10,
-        plot_filename_prefix=args.output_prefix)
+        plot_filename_prefix=args.output_prefix, full_output=True)
+
+    parameters, state, converged, transitions, spectra = result
 
     if converged:
         # Do something with the results?
@@ -287,7 +289,7 @@ def solve(args):
                 result = process.get()
 
             except:
-                logger.exception("Failed to retrieve result for star {0}".format(i))
+                logger.exception("Failed to retrieve result for star {0}:".format(i))
                 if args.debug:
                     raise
                 else:
