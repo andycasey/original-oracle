@@ -138,20 +138,22 @@ def solve_generative(args):
     raise a
 
 
-def solve_theremin(data, args):
+def solve_theremin(data, args, **kwargs):
     """ The-not-ere-min solver """
 
     t_init = time()
     model = oracle.models.ThereminModel(args.config_filename)
 
     # We cannot plot in forked processes.
-    plotting = args.plotting if args.threads > 1 else False
+    plotting = False if args.threads > 1 else args.plotting
+    output_prefix = args.output_prefix if args.output_prefix is not None else \
+        kwargs.pop("default_output_prefix", "oracle")
 
     # Optimise the model parameters and plot the transition fits at every 10th
     # iteration of stellar parameters
     parameters, state, converged, transitions, spectra, sampled_parameters, \
         parameter_states = model.optimise(data, plotting=plotting, 
-            plot_transition_frequency=10, plot_filename_prefix=args.output_prefix,
+            plot_transition_frequency=10, plot_filename_prefix=output_prefix,
             full_output=True)
 
     # Plot the sampled progress, and whether convergence was achieved?
@@ -225,24 +227,33 @@ def solve_classical(args):
     logger.info("Fin.")
 
 
-def _wrapper(func, star, arg):
+def _wrapper(func, star, arg, kwds=None):
     try:
-        return apply(func, (star, arg))
+        return apply(func, (star, arg, kwds))
     except:
         logger.info("Wrapper failed!")
     else:
         return None
 
+
+def _default_output_prefix(filenames):
+
+    if isinstance(filenames, (str, )):
+        filenames = [filenames]
+
+    common_prefix = os.path.commonprefix(map(os.path.basename, filenames))
+    if os.path.exists(common_prefix):
+        common_prefix, ext = os.path.splitext(common_prefix)
+    else:
+        common_prefix = common_prefix.rstrip("_-.")
+    return common_prefix
+
+
 def solve(args):
+
 
     # Check availability of plotting format
     _check_plot_format(args.plotting, args.plot_fmt)
-
-    # Before doing heaps of analysis, look to see if we intend to create some
-    # files and if those files already exist -- and we have been told not to 
-    # clobber them -- then we should raise an exception now before doing any
-    # real work
-    _check_for_existing_files(args)
 
     # If the -r flag is given then we are solving for many stars and (probably)
     # doing things in parallel. Let's deal with the spectrum loading here.
@@ -271,6 +282,11 @@ def solve(args):
         data.sort(key=lambda spectrum: spectrum.disp.mean())
         stars = [data]
 
+        # Output prefix
+        if args.output_prefix is None:
+            args.output_prefix = _default_output_prefix(args.spectra_filenames)
+
+
     solver = {
         "theremin": solve_theremin,
         "classical": solve_classical,
@@ -288,8 +304,9 @@ def solve(args):
             logger.warn("Cannot create plots in threaded processes. Disabling "\
                 " plots during analysis. Not all plots will be created.")
         
-        processes = [pool.apply_async(_wrapper, args=(solver, star, args)) \
-            for star in stars]
+        processes = [pool.apply_async(_wrapper, args=(solver, star, args),
+            kwds={"default_output_prefix": _default_output_prefix(filenames)}) \
+            for star, filenames in zip(stars, spectra_filenames_list)]
 
         # OK, grab the results
         for i, process in enumerate(processes):
@@ -394,7 +411,7 @@ def main():
         default=True, help="Disable plotting.")
 
     solve_parser.add_argument("--output-prefix", "-o", dest="output_prefix",
-        default="oracle", help="The filename prefix to use for all output files.")
+        default=None, help="The filename prefix to use for all output files.")
 
     solve_parser.add_argument("--plot-format", "-pf", dest="plot_fmt",
         action="store", type=str, default="pdf", help="Format for output plots "\
