@@ -254,6 +254,7 @@ class ThereminModel(Model):
             # Optimise the model parameters given some set of stellar parameters
             try:
                 transitions, spectra = model.optimise(*args, full_output=True)
+                logger.debug("Finished one iteration")
 
             except si.SIException:
                 # Looks like these parameters are unphysical. Log it, and try 
@@ -265,18 +266,22 @@ class ThereminModel(Model):
                 raise
 
             # Apply constraints
+            logger.debug("Applying constraints")
             ok = self._apply_constraints(transitions, constraints)
 
             # Calculate first order derivatives
+            logger.debug("Calculating state")
             state = self._excitation_ionisation_state(transitions[ok], args[2])
 
             # Should we make some plots?
+            logger.debug("Plotting..")
             if plotting:
                 fig = plot_balance(transitions[ok], title="$T_{{\\rm eff}}$ = "\
                     "{0:.0f} K, log(g) = {1:.3f}, [M/H] = {2:.3f} $\\xi$ = "\
                     "{3:.3f} km/s".format(*args))
                 fig.savefig("{0}-iter{1}-state.png".format(plot_filename_prefix,
                     iteration))
+                logger.debug("Closing figure")
                 plt.close(fig)
 
                 # Have we reached the right plotting transition frequency
@@ -326,14 +331,14 @@ class ThereminModel(Model):
             else:
                 parameter_convergence = False
 
-            logger.info("State convergence {2} achieved: {0} {3} |{1}|".format(
-                state_tolerance, state, ["not", ""][state_convergence],
+            logger.info("State convergence {2}achieved: {0} {3} |{1}|".format(
+                state_tolerance, state, ["not ", ""][state_convergence],
                 "<>"[state_convergence])) # isn't python awesome?
 
             if iteration > 1:
-                logger.info("Parameter convergence {2} achieved: {0} {3} |{1}|".format(
+                logger.info("Parameter convergence {2}achieved: {0} {3} |{1}|".format(
                     np.abs(parameter_tolerance), np.array(args) - sampled_parameters[-1],
-                    ["not", ""][parameter_convergence], "<>"[parameter_convergence]))
+                    ["not ", ""][parameter_convergence], "<>"[parameter_convergence]))
 
             # Dat logic.
             if (convergence_rule == "state" and state_convergence) \
@@ -1349,11 +1354,13 @@ class SpectrumModel(Model):
 
         # Create a record array with the equivalent width, abundance, smoothing?
         # reduced equivalent width.
+        logger.debug("Creating record array")
         transition_indices = sum([self._transition_mapping[i] for i in xrange(len(self.data))], [])
         results = numpy.lib.recfunctions.append_fields(
             np.array([self.atomic_lines[i] for i in transition_indices]),
             ("abundance", "line_depth", "instrumental_resolution", "chi_sq", 
                 "equivalent_width", "warnflag"), np.array(rows).T, usemask=False)
+        logger.debug("Returning results")
 
         if full_output:
             return (results, spectra)

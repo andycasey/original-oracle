@@ -144,12 +144,17 @@ def solve_theremin(data, args):
     t_init = time()
     model = oracle.models.ThereminModel(args.config_filename)
 
+    # We cannot plot in forked processes.
+    plotting = args.plotting if args.thread > 1 else False
+
     # Optimise the model parameters and plot the transition fits at every 10th
     # iteration of stellar parameters
     parameters, state, converged, transitions, spectra, sampled_parameters, \
-        parameter_states = model.optimise(data, plotting=True, 
+        parameter_states = model.optimise(data, plotting=plotting, 
             plot_transition_frequency=10, plot_filename_prefix=args.output_prefix,
             full_output=True)
+
+    # Plot the sampled progress, and whether convergence was achieved?
 
     if converged:
         # Do something with the results?
@@ -159,7 +164,8 @@ def solve_theremin(data, args):
         print("Did not converge. Final parameters tried were {0} with state {1}"\
             .format(parameters, state))
 
-    return (parameters, state, converged, transitions, spectra)
+    return (parameters, state, converged, transitions, spectra, 
+        sampled_parameters, parameter_states)
 
 
 
@@ -252,7 +258,7 @@ def solve(args):
 
         stars = []
         for filename_list in spectra_filenames_list:
-            data = map(oracle.specutils.Spectrum.load, filename_list)
+            data = map(oracle.specutils.Spectrum.load, filename_list.split())
             data.sort(key=lambda spectrum: spectrum.disp.mean())
             stars.append(data)
 
@@ -277,6 +283,10 @@ def solve(args):
         # Parallelise
         logger.info("Pooling {0} threads".format(threads))
         pool = mp.Pool(threads)
+
+        if args.plotting:
+            logger.warn("Cannot create plots in threaded processes. Disabling "\
+                " plots during analysis. Not all plots will be created.")
         
         processes = [pool.apply_async(_wrapper, args=(solver, star, args)) \
             for star in stars]
