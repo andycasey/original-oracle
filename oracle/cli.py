@@ -9,6 +9,7 @@ __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 # Necessary for all sub-parsers
 import argparse
 import logging
+import multiprocessing as mp
 import os
 from time import time
 
@@ -16,10 +17,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import triangle
 
-import plot
-import models
-import specutils
-from utils import latexify
+ 
+import oracle
 
 image_path = lambda s, args: os.path.abspath(os.path.expanduser(s.format(
     args.output_prefix, args.plot_fmt)))
@@ -27,24 +26,29 @@ image_path = lambda s, args: os.path.abspath(os.path.expanduser(s.format(
 logger = logging.getLogger("oracle")
 
 
-def _check_plot_format(args):
+def _check_plot_format(plotting, plot_fmt):
     """ If plotting is enabled, this checks that the requested plot format is
     actually available on this system. """
 
-    if args.plotting:
+    if plotting:
         fig = plt.figure()
         available = map(str.lower, fig.canvas.get_supported_filetypes().keys())
         plt.close(fig)
 
-        if args.plot_fmt.lower() not in available:
+        if plot_fmt.lower() not in available:
             raise ValueError("Plotting format {0} is not available on this "\
-                "system. Available formats are: {1}".format(args.plot_fmt.lower(),
+                "system. Available formats are: {1}".format(plot_fmt.lower(),
                     ", ".join(available)))
     return True
+
 
 def _check_for_existing_files(args):
     """ Create a list of files that the argument parser will create then check
     to see if those files already exist. """
+
+    # TODO
+    logger.warn("This may overwrite existing plots!")
+    return True
 
     if args.clobber:
         return None
@@ -65,8 +69,8 @@ def solve_generative(args):
     """ Generative Model Solver """
 
     # Create the model and load the spectra.
-    model = models.GenerativeModel(args.config_filename)
-    data = map(specutils.Spectrum.load, args.spectra_filenames)
+    model = oracle.models.GenerativeModel(args.config_filename)
+    data = map(oracle.specutils.Spectrum.load, args.spectra_filenames)
 
     # Sort the spectra from blue to red
     data.sort(key=lambda spectrum: spectrum.disp.mean())
@@ -80,7 +84,7 @@ def solve_generative(args):
     # Create figure showing the initial guess
     if args.plotting:
         path = image_path("{0}-initial.{1}", args)
-        fig = plot.spectrum_comparison(data, model, initial_guess)
+        fig = oracle.plot.spectrum_comparison(data, model, initial_guess)
         fig.savefig(path)
         plt.close(fig)
 
@@ -92,7 +96,7 @@ def solve_generative(args):
     # Plot a projection showing the optimised theta
     if args.plotting:
         path = image_path("{0}-optimal.{1}", args)
-        fig = plot.spectrum_comparison(data, model, optimised_theta)
+        fig = oracle.plot.spectrum_comparison(data, model, optimised_theta)
         fig.savefig(path)
         plt.close(fig)
 
@@ -110,13 +114,13 @@ def solve_generative(args):
 
         # Plot the mean acceptance fractions
         path = image_path("{0}-acceptance.{1}", args)
-        fig = plot.acceptance_fractions(additional_info["mean_acceptance_fractions"])
+        fig = oracle.plot.acceptance_fractions(additional_info["mean_acceptance_fractions"])
         fig.savefig(path)
         plt.close(fig)
 
         # Plot the values of the chains
         path = image_path("{0}-chains.{1}", args)
-        fig = plot.chains(sampler.chain)
+        fig = oracle.plot.chains(sampler.chain)
         fig.savefig(path)
         plt.close(fig)
 
@@ -125,7 +129,7 @@ def solve_generative(args):
         path = image_path("{0}-corner.{1}", args)
         index = additional_info["burn"] * additional_info["walkers"]
         fig = triangle.corner(sampler.chain.reshape(-1, len(model.parameters))[index:, :],
-            labels=latexify(model.parameters))
+            labels=oracle.utils.latexify(model.parameters))
         fig.savefig(path)
         plt.close(fig)
 
@@ -134,21 +138,17 @@ def solve_generative(args):
     raise a
 
 
-def solve_theremin(args):
+def solve_theremin(data, args):
     """ The-not-ere-min solver """
 
     t_init = time()
-    
-    data = map(theremin.specutils.Spectrum1D.load, args.spectra_filenames)
-    data.sort(key=lambda s: s.disp[0])
-
-    model = theremin.ThereminModel(args.config_filename)
+    model = oracle.models.ThereminModel(args.config_filename)
 
     # Optimise the model parameters and plot the transition fits at every 10th
     # iteration of stellar parameters
     parameters, state, converged, transitions, spectra = model.optimise(data,
-      plotting=True, plot_transition_frequency=10,
-      plot_filename_prefix=args.output_prefix)
+        plotting=True, plot_transition_frequency=10,
+        plot_filename_prefix=args.output_prefix)
 
     if converged:
         # Do something with the results?
@@ -159,7 +159,7 @@ def solve_theremin(args):
         print("Did not converge. Final parameters tried were {0} with state {1}"
             .format(parameters, state))
 
-    raise a
+    return (parameters, state, converged, transitions, spectra)
 
 
 
@@ -169,8 +169,8 @@ def solve_classical(args):
     t_init = time()
 
     # Create the model and load the spectra.
-    data = map(specutils.Spectrum.load, args.spectra_filenames)
-    model = models.StellarSpectrum(args.config_filename, data)
+    data = map(oracle.specutils.Spectrum.load, args.spectra_filenames)
+    model = oracle.models.StellarSpectrum(args.config_filename, data)
 
     # Sort the spectra from blue to red
     data.sort(key=lambda spectrum: spectrum.disp.mean())
@@ -184,7 +184,7 @@ def solve_classical(args):
 
         model_spectra = [c(s.disp, **theta) for c, s, theta in \
             zip(model.channels, data, optimised_model_parameters)]
-        fig = plot.spectrum_comparison(data, model, model_spectra=model_spectra)
+        fig = oracle.plot.spectrum_comparison(data, model, model_spectra=model_spectra)
         fig.savefig(path)
         logger.info("Saved figure to {0}".format(path))
         plt.close(fig)
@@ -206,7 +206,7 @@ def solve_classical(args):
     if args.plotting:
         path = image_path("{0}-balance.{1}", args)
 
-        fig = plot.balance(op_atomic_data)
+        fig = oracle.plot.balance(op_atomic_data)
         fig.savefig(path)
         fig.axes[0].set_title(["Not converged", "Converged"][op_converged])
         logger.info("Saved figure to {0}".format(path))
@@ -219,10 +219,18 @@ def solve_classical(args):
     logger.info("Fin.")
 
 
+def _wrapper(func, star, arg):
+    try:
+        return apply(func, (star, arg))
+    except:
+        logger.info("Wrapper failed!")
+    else:
+        return None
+
 def solve(args):
 
     # Check availability of plotting format
-    _check_plot_format()
+    _check_plot_format(args.plotting, args.plot_fmt)
 
     # Before doing heaps of analysis, look to see if we intend to create some
     # files and if those files already exist -- and we have been told not to 
@@ -230,17 +238,89 @@ def solve(args):
     # real work
     _check_for_existing_files(args)
 
-    if args.analysis_type == "generative":
-        solve_generative(args)
+    # If the -r flag is given then we are solving for many stars and (probably)
+    # doing things in parallel. Let's deal with the spectrum loading here.
+    if args.read_from_filename:
+        if len(args.spectra_filenames) > 1:
+            raise ValueError("only provide a single filename when using the -r flag")
 
-    elif args.analysis_type == "classical":
-        solve_classical(args)
+        with open(args.spectra_filenames[0], "r") as fp:
+            spectra_filenames_list = map(str.strip, fp.readlines())
 
-    elif args.analysis_type == "theremin":
-        solve_theremin(args)
+        logger.info("Found spectra for {0} stars from {1}".format(
+            len(spectra_filenames_list), args.spectra_filenames[0]))
+
+        stars = []
+        for filename_list in spectra_filenames_list:
+            data = map(oracle.specutils.Spectrum.load, filename_list)
+            data.sort(key=lambda spectrum: spectrum.disp.mean())
+            stars.append(data)
 
     else:
-        raise NotImplementedError("how did you get here?")
+
+        logger.info("Single star assumed. Loading {0} files: {1}".format(
+            len(args.spectra_filenames), ", ".join(args.spectra_filenames)))
+        # This implicitly assumes that each filename is a single extension 1D file
+        data = map(oracle.specutils.Spectrum.load, args.spectra_filenames)
+        data.sort(key=lambda spectrum: spectrum.disp.mean())
+        stars = [data]
+
+    solver = {
+        "theremin": solve_theremin,
+        "classical": solve_classical,
+        "generative": solve_generative
+    }[args.analysis_type]
+
+    threads = args.threads if args.threads > 0 else mp.cpu_count()
+    if threads > 1:
+
+        # Parallelise
+        logger.info("Pooling {0} threads".format(threads))
+        pool = mp.Pool(threads)
+        
+        processes = [pool.apply_async(_wrapper, args=(solver, star, args)) \
+            for star in stars]
+
+        # OK, grab the results
+        for i, process in enumerate(processes):
+            try:
+                result = process.get()
+
+            except:
+                logger.exception("Failed to retrieve result for star {0}".format(i))
+                if args.debug:
+                    raise
+                else:
+                    continue
+
+            else:
+                # Save the outputs?
+                logger.info("Finished with star {0}. Not sure what to do with "\
+                    "the outputs yet.".format(i))
+
+        # Close the pool
+        pool.close()
+        pool.join()
+
+    else:
+        # Single thread
+        logger.info("Performing serial calculations")
+        for i, star in enumerate(stars):
+            try:
+                result = apply(solver, (data, args))
+
+            except:
+                logger.exception("Failed to solve for star {0}".format(i))
+                if args.debug:
+                    raise
+                else:
+                    continue
+
+            else:
+                logger.info("Finished with star {0}. Not sure what to do with "\
+                    "the outputs yet.".format(i))
+
+    
 
 
 def infer(args):
@@ -309,6 +389,13 @@ def main():
     solve_parser.add_argument("--plot-format", "-pf", dest="plot_fmt",
         action="store", type=str, default="pdf", help="Format for output plots "\
         "(default: %(default)s)")
+
+    solve_parser.add_argument("--from-filename", "-r", dest="read_from_filename",
+        action="store_true", default=False, help="Read input spectra from a filename.")
+
+    solve_parser.add_argument("--threads", "-t", dest="threads", action="store",
+        type=int, default=1, help="Number of parallel threads to use.")
+
     solve_parser.set_defaults(func=solve)
 
 

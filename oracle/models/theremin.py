@@ -203,6 +203,8 @@ class ThereminModel(Model):
         model = SpectrumModel(self.config, data)
 
         global sampled_parameters, parameter_states
+        parameter_states = []
+        sampled_parameters = []
         @utils.rounder(0, 3, 3, 3)
         @utils.lru_cache(maxsize=25, typed=False)
         def do_balance(*args):
