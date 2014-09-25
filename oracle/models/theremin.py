@@ -158,7 +158,7 @@ class ThereminModel(Model):
 
 
     def optimise(self, data, initial_theta=None, constraints=None,
-        tolerance=[1e-3, 1e-3, 1e-3, 1e-3], op_kwds=None, plotting=True,
+        tolerance=[1e-3, 1e-3, 1e-2, 1e-2], op_kwds=None, plotting=True,
         full_output=True, **kwargs):
         """
         Optimise the model parameters given some data.
@@ -246,7 +246,7 @@ class ThereminModel(Model):
                 # (by iteration), or is it the first iteration?
                 if (plot_transition_frequency > 0 and \
                     (iteration % plot_transition_frequency) == 0) \
-                or iteration == 0:
+                or iteration == 1:
                     # Plot the transitions 
 
                     logger.info("Plotting transition fits...")
