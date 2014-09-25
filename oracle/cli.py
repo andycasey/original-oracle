@@ -146,19 +146,17 @@ def solve_theremin(data, args):
 
     # Optimise the model parameters and plot the transition fits at every 10th
     # iteration of stellar parameters
-    result = model.optimise(data,
-        plotting=True, plot_transition_frequency=10,
-        plot_filename_prefix=args.output_prefix, full_output=True)
-
-    parameters, state, converged, transitions, spectra = result
+    parameters, state, converged, transitions, spectra, sampled_parameters, \
+        parameter_states = model.optimise(data, plotting=True, 
+            plot_transition_frequency=10, plot_filename_prefix=args.output_prefix,
+            full_output=True)
 
     if converged:
         # Do something with the results?
-        print("Star {0} has converged with {1} and state {2}".format(benchmark, 
-            parameters, state))
+        logger.info("Convergence achieved!")
 
     else:
-        print("Did not converge. Final parameters tried were {0} with state {1}"
+        print("Did not converge. Final parameters tried were {0} with state {1}"\
             .format(parameters, state))
 
     return (parameters, state, converged, transitions, spectra)

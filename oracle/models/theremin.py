@@ -154,11 +154,25 @@ class ThereminModel(Model):
         metallicity_state = np.median(transitions["abundance"][neutral]) \
             - metallicity
 
+
+        """
+        # Calculate crude, probably wrong, estimated uncertainties in slopes, etc.
+        u_exc_slope 
+
+        u_ionisation_state = np.std(transitions["abundance"][neutral] \
+            - )
+
+        u_metallicity_state = np.std(transitions["abundance"][neutral] \
+            - metallicity)/np.sqrt(len(transitions["abundance"][neutral]))
+        """
+
         return np.array([exc_slope, lst_slope, ionisation_state, metallicity_state])
 
 
     def optimise(self, data, initial_theta=None, constraints=None,
-        tolerance=[1e-3, 1e-3, 1e-2, 1e-2], op_kwds=None, plotting=True,
+        state_tolerance=[1e-3, 1e-3, 1e-2, 1e-2], 
+        parameter_tolerance=[5, 0.01, 0.01, 0.01], convergence_rule="or",
+        op_kwds=None, plotting=True,
         full_output=True, **kwargs):
         """
         Optimise the model parameters given some data.
@@ -191,12 +205,26 @@ class ThereminModel(Model):
             constraints = self._default_constraints
             
         # Some dumb-user (e.g., self-) checking
-        assert np.all(np.array(tolerance) > 0), "Tolerance values must be positive"\
-            " and absolute."
+        convergence_rule = convergence_rule.lower()
+        if convergence_rule not in ("or", "and", "state", "parameter"):
+            raise ValueError("tolerance rule must be 'or', 'and', 'state', or "\
+                "'parameter'")
+        assert np.all(np.array(state_tolerance) > 0), "Tolerance values must be"\
+            " positive and absolute."
+        assert np.all(np.array(parameter_tolerance) > 0), "Tolerance values must"\
+            " be positive and absolute."
         assert len(initial_theta) == len(self.parameters)
 
-        logger.info("Performing excitation and ionisation balance with absolute"\
-            "tolerance: {0}".format(tolerance))
+        message = {
+            "state": "state < |{0}|".format(state_tolerance),
+            "parameter": "d(parameter) < |{0}|".format(parameter_tolerance),
+        }
+        message.update({
+            "or": "{0} or {1}".format(*message.values()),
+            "and": "{0} and {1}".format(*message.values())
+        })
+        logger.info("Performing excitation and ionisation balance. Requirements"\
+            " for convergence are:\n{0}".format(message[convergence_rule]))
         logger.info("Initial stellar parameters: Teff = {0:.0f} K, log(g) = "\
             "{1:.3f}, [M/H] = {2:.3f}, xi = {3:.3f} km/s".format(*initial_theta))
 
@@ -204,7 +232,8 @@ class ThereminModel(Model):
         # So we need another model class.
         model = SpectrumModel(self.config, data)
 
-        global sampled_parameters, parameter_states
+        global sampled_parameters, parameter_states, start_count
+        start_count = [0]
         parameter_states = []
         sampled_parameters = []
         @utils.rounder(0, 3, 3, 3)
@@ -213,27 +242,33 @@ class ThereminModel(Model):
 
             # Check for a full output
             args = list(args)
-            full_output = args.pop(-1) if len(args) == len(self.parameters) + 1 else False
+            callback = args.pop(-1) if len(args) == len(self.parameters) + 1 else False
 
             t_a = time()
-            global sampled_parameters, parameter_states
+            global sampled_parameters, parameter_states, start_count
 
             iteration = len(sampled_parameters) + 1
             logger.info("Performing balance for {0} (iteration #{1})".format(
                 args, iteration))
 
             # Optimise the model parameters given some set of stellar parameters
-            transitions, spectra = model.optimise(*args, full_output=True)
+            try:
+                transitions, spectra = model.optimise(*args, full_output=True)
+
+            except si.SIException:
+                # Looks like these parameters are unphysical. Log it, and try 
+                # solving again from a new starting point.
+                logger.exception("Problem in optimising line abundances for "\
+                    "stellar parameters {0}. Trying with new starting point."\
+                    .format(args))
+                start_count[0] += 1
+                raise
 
             # Apply constraints
             ok = self._apply_constraints(transitions, constraints)
 
             # Calculate first order derivatives
-            teff, logg, metallicity, xi = args
-            state = self._excitation_ionisation_state(transitions[ok], metallicity)
-
-            sampled_parameters.append(args)
-            parameter_states.append(state)
+            state = self._excitation_ionisation_state(transitions[ok], args[2])
 
             # Should we make some plots?
             if plotting:
@@ -260,29 +295,63 @@ class ThereminModel(Model):
                         path = "{0}-iter{1}-fit-{2:.2f}.png".format(
                             plot_filename_prefix, iteration, transition["wavelength"])
                         fig = plot_transition(data[data_index], self, spectrum, 
-                            transition["wavelength"], title="$\chi^2 = {0:.2f}$, R={7:.0f}, [{1} "\
-                            "{2:.0f} @ {3:.2f}/H] = {4:.2f}, $EW = {5:.2f} m\AA$ ({6})".format(
+                            transition["wavelength"], title="$\chi^2 = {0:.2f}$"\
+                            ", R={7:.0f}, [{1} {2:.0f} @ {3:.2f}/H] = {4:.2f}, "\
+                            "$EW = {5:.2f} m\AA$ ({6})".format(
                                 transition["chi_sq"], 
                                 utils.element(transition["atomic_number"]),
                                 transition["ionised"],
                                 transition["wavelength"],
                                 transition["abundance"],
                                 transition["equivalent_width"],
-                                ["REJECTED", "ACCEPTED"][ok[i]], transition["instrumental_resolution"]))
+                                ["REJECTED", "ACCEPTED"][ok[i]],
+                                transition["instrumental_resolution"]))
                         fig.savefig(path)
                         logger.info("Created image {0}".format(path))
                         plt.close(fig)
 
-            if np.all(np.less_equal(np.abs(state), tolerance)):
-                if full_output:
-                    return (state, transitions, spectra)
-                raise ConvergenceAchieved(args, state)
-
             logger.info("State for {0} is {1} and took {2:.2f} seconds".format(
                 args, state, time() - t_a))
 
-            if full_output:
+            # Callback calls don't require convergence checks.
+            if callback:
                 return (state, transitions, spectra)
+
+            # Check for convergence
+            state_convergence = np.all(np.less_equal(np.abs(state), state_tolerance))
+            if iteration > 1:
+                parameter_convergence = np.all(np.less_equal(
+                    np.abs(np.array(args) - sampled_parameters[-1]),
+                    parameter_tolerance))
+            else:
+                parameter_convergence = False
+
+            logger.info("State convergence {2} achieved: {0} {3} |{1}|".format(
+                state_tolerance, state, ["not", ""][state_convergence],
+                "<>"[state_convergence])) # isn't python awesome?
+
+            if iteration > 1:
+                logger.info("Parameter convergence {2} achieved: {0} {3} |{1}|".format(
+                    np.abs(parameter_tolerance), np.array(args) - sampled_parameters[-1],
+                    ["not", ""][parameter_convergence], "<>"[parameter_convergence]))
+
+            # Dat logic.
+            if (convergence_rule == "state" and state_convergence) \
+            or (convergence_rule == "parameter" and parameter_convergence) \
+            or (convergence_rule == "or" \
+                and (state_convergence or parameter_convergence)) \
+            or (convergence_rule == "and" \
+                and (state_convergence and parameter_convergence)):
+                converged = True
+            else:
+                converged = False
+
+            # Save the sampled parameters and state
+            sampled_parameters.append(args)
+            parameter_states.append(state)
+
+            if converged:
+                raise ConvergenceAchieved(args, state)
 
             return state
 
@@ -297,42 +366,49 @@ class ThereminModel(Model):
         if op_kwds is not None:
             op_kwds.update(op_kwds)
 
-        try:
-            opt, infodict, ier, mesg = op.fsolve(lambda a: do_balance(*tuple(a)),
-                initial_theta, **op_kwds)
+        while True:
+            try:
+                opt, infodict, ier, mesg = op.fsolve(
+                    lambda a: do_balance(*tuple(a)), initial_theta, **op_kwds)
 
-        except ConvergenceAchieved as (opt, state):
-            # Woo hoo!
-            # Should we plot transitions?
-            logger.info("Convergence achieved. Optimised stellar parameters are"\
-                " Teff = {0:.0f} K, logg = {1:.3f}, [M/H] = {2:.3f}, xi = {3:.3f}"\
-                " km/s".format(*opt))
-            logger.info("State tolerance was: {0}".format(state))
+            except ConvergenceAchieved as (opt, state):
+                # Woo hoo!
+                # Should we plot transitions?
+                logger.info("Convergence achieved. Optimised stellar parameters are"\
+                    " Teff = {0:.0f} K, logg = {1:.3f}, [M/H] = {2:.3f}, xi = {3:.3f}"\
+                    " km/s".format(*opt))
+                logger.info("State was: {0}".format(state))
 
-            # Since we don't have infodict, etc, let's just make them up.
-            converged, ier, infodict = True, 0, {}
-            mesg = "Convergence achieved after {0} iterations".format(len(sampled_parameters))
-            if full_output:
-                opt_with_full_output = list(opt) + [True]
+                # Since we don't have infodict, etc, let's just make them up.
+                converged, ier, infodict = True, 0, {}
+                mesg = "Convergence achieved after {0} iterations".format(len(sampled_parameters))
+                if full_output:
+                    opt_with_full_output = list(opt) + [True]
+                    state, transitions, spectra = do_balance(*opt_with_full_output)
+                break
+
+            except si.SIException:
+                # We should catch these and re-raise during debugging.
+                if 3 > start_count[0]:
+                    initial_theta = self.initial_guess()
+                    continue
+
+                else:
+                    raise
+
+            else:
+                # Should we try again?
+                logger.warn("Convergence not achieved: {0}".format(mesg.replace("\n ", "")))
+
+                converged = False
+                if full_output:
+                    opt_with_full_output = list(opt) + [True]
                 state, transitions, spectra = do_balance(*opt_with_full_output)
-
-        except:
-            # We should catch these and re-raise during debugging.
-            raise
-
-        else:
-            # Should we try again?
-            logger.warn("Convergence not achieved: {0}".format(mesg.replace("\n ", "")))
-
-            converged = False
-            if full_output:
-                opt_with_full_output = list(opt) + [True]
-                state, transitions, spectra = do_balance(*opt_with_full_output)
+                break
         
         info = {
             "niterations": len(sampled_parameters) - 1
         }
-
 
         if full_output:
             return (opt, state, converged, transitions, spectra, sampled_parameters,
