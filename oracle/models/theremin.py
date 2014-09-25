@@ -196,14 +196,13 @@ class ThereminModel(Model):
         assert len(initial_theta) == len(self.parameters)
 
         logger.info("Initial stellar parameters: Teff = {0:.0f} K, log(g) = "\
-            "{2:.3f}, [M/H] = {3:.3f}, xi = {1:.3f} km/s".format(*initial_theta))
+            "{1:.3f}, [M/H] = {2:.3f}, xi = {3:.3f} km/s".format(*initial_theta))
 
         # At each stellar parameter test we need to re-fit all the lines
         # So we need another model class.
         model = SpectrumModel(self.config, data)
 
-        global iteration_counts
-        iteration_counts = [-1]
+        global sampled_parameters, parameter_states
         @utils.rounder(0, 3, 3, 3)
         @utils.lru_cache(maxsize=25, typed=False)
         def do_balance(*args):
@@ -213,11 +212,11 @@ class ThereminModel(Model):
             full_output = args.pop(-1) if len(args) == len(self.parameters) + 1 else False
 
             t_a = time()
-            global iteration_counts
-            iteration_counts[0] += 1
+            global sampled_parameters, parameter_states
 
+            iteration = len(sampled_parameters) + 1
             logger.info("Performing balance for {0} (iteration #{1})".format(
-                args, iteration_counts[0]))
+                args, iteration))
 
             # Optimise the model parameters given some set of stellar parameters
             transitions, spectra = model.optimise(*args, full_output=True)
@@ -229,13 +228,16 @@ class ThereminModel(Model):
             teff, logg, metallicity, xi = args
             state = self._excitation_ionisation_state(transitions[ok], metallicity)
 
+            sampled_parameters.append(args)
+            parameter_states.append(state)
+
             # Should we make some plots?
             if plotting:
                 fig = plot_balance(transitions[ok], title="$T_{{\\rm eff}}$ = "\
                     "{0:.0f} K, log(g) = {1:.3f}, [M/H] = {2:.3f} $\\xi$ = "\
                     "{3:.3f} km/s".format(*args))
                 fig.savefig("{0}-iter{1}-state.png".format(plot_filename_prefix,
-                    iteration_counts[0]))
+                    iteration))
                 plt.close(fig)
 
                 # Have we reached the right plotting transition frequency
@@ -252,8 +254,7 @@ class ThereminModel(Model):
                         data_index = model._get_data_index(i)
 
                         path = "{0}-iter{1}-fit-{2:.2f}.png".format(
-                            plot_filename_prefix, iteration_counts[0],
-                            transition["wavelength"])
+                            plot_filename_prefix, iteration, transition["wavelength"])
                         fig = plot_transition(data[data_index], self, spectrum, 
                             transition["wavelength"], title="$\chi^2 = {0:.2f}$, R={7:.0f}, [{1} "\
                             "{2:.0f} @ {3:.2f}/H] = {4:.2f}, $EW = {5:.2f} m\AA$ ({6})".format(
@@ -317,7 +318,7 @@ class ThereminModel(Model):
 
         else:
             # Should we try again?
-            logger.warn("Convergence not achieved: {0}".format(mesg.replace("\n", "")))
+            logger.warn("Convergence not achieved: {0}".format(mesg.replace("\n ", "")))
 
             converged = False
             if full_output:
@@ -325,7 +326,8 @@ class ThereminModel(Model):
                 state, transitions, spectra = do_balance(*opt_with_full_output)
             
         if full_output:
-            return (opt, state, converged, transitions, spectra)
+            return (opt, state, converged, transitions, spectra, sampled_parameters,
+                parameter_states)
         return (opt, state, converged)
 
 
