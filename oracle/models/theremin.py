@@ -524,11 +524,11 @@ class ThereminModel(Model):
                     plt.close(fig)
 
             if full_output:
-                return xopt, converged, opt_transitions, synthetic_spectra
+                return (opt, converged, opt_transitions, synthetic_spectra)
        
         logger.info("done in ",time() - t_started)
 
-        return xopt, converged
+        return (opt, converged)
 
 
 
@@ -560,8 +560,12 @@ class SpectrumModel(Model):
         self.data = data
         self._optimised_theta = None
 
-        assert os.path.exists(self.config["ThereminModel"]["clean_line_list_filename"])
-        assert os.path.exists(self.config["ThereminModel"]["blend_line_list_filename"])
+        if not os.path.exists(self.config["ThereminModel"]["clean_line_list_filename"]):
+            raise IOError("cannot find clean line list filename {0}".format(
+                self.config["ThereminModel"]["clean_line_list_filename"]))
+        if not os.path.exists(self.config["ThereminModel"]["blend_line_list_filename"]):
+            raise IOError("cannot find blended line list filename {0}".format(
+                self.config["ThereminModel"]["blend_line_list_filename"]))
 
         self.atomic_lines = si.io.read_line_list(
             self.config["ThereminModel"]["clean_line_list_filename"])
