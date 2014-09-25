@@ -229,11 +229,8 @@ class SpectralChannel(Model):
                 loc=np.mean(spectral_resolutions),
                 scale=np.std(spectral_resolutions)).sum()
 
-        for parameter, distribution in self.config.get("priors", {}).iteritems():
-            f = eval(distribution, _log_prior_eval_environment)
-            ln_prior += f(theta_dict[parameter])
+        return ln_prior + sum([self.evaluate_lnprior(p, v) for p, v in theta_dict.iteritems()])
 
-        return ln_prior
 
     
     def _log_likelihood(self, theta, data):

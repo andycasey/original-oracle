@@ -17,7 +17,7 @@ __all__ = ["Model"]
 
 logger = logging.getLogger("oracle")
 
-_log_prior_eval_environment = { 
+_prior_env = { 
     "locals": None,
     "globals": None,
     "__name__": None,
@@ -141,6 +141,30 @@ class Model(object):
             logger.warn("{0}. Optimised values may be inaccurate.".format(
                 message[warnflag]))
         return None
+
+
+    def evaluate_lnprior(self, parameter, value):
+        """
+        Evaluate the logarithmic prior probability as specified in the input
+        configuration file for a given parameter at a given theta value.
+
+        :param parameter:
+            The model parameter to evaluate.
+
+        :type parameter:
+            str
+        
+        :param value:
+            The value of the input theta value to evaluate the prior probability
+            for.
+
+        :type value:
+            float
+        """
+
+        f = eval(self.config.get("priors", {}).get(parameter, "lambda x: 0"),
+            _prior_env)
+        return f(value)
 
 
     def mask(self, dispersion, z=0., fill_value=np.nan, use_cached=False):

@@ -1201,8 +1201,11 @@ class SpectrumModel(Model):
         def chi_sq(args, full_output=False):
 
             depth, resolution, wl_offset = args
-            if not (1 >= depth >= 0) or not (30000 >= resolution >= 20000) \
-            or not (0.05 > wl_offset > -0.05):
+
+            if not (1 >= depth >= 0) or not (0.05 > wl_offset > -0.05) \
+            or 0 > resolution \
+            or not np.isfinite(self.evaluate_lnprior("instrumental_resolution", 
+                resolution)):
                 return invalid_response
 
             sigma = (wavelength/resolution)/2.35482

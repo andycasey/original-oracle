@@ -1,11 +1,7 @@
 ThereminModel: 
   blend_line_list_filename: /Users/arc/codes/oracle/oracle/si/linedata/HERMES_blending.dat
   clean_line_list_filename: /Users/arc/codes/oracle/oracle/si/linedata/HERMES_clean.dat
-  convergence_tolerance:
-    dA/dχ: 0.001
-    dA/dREW: 0.001
-    X_I-X_II: 0.01
-    X-M: 0.01
+
 mask:
 - [4700, 4705.6588]
 - [4705.7587, 4711.2]

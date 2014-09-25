@@ -18,7 +18,7 @@ from scipy import optimize as op, stats
 from scipy.ndimage import gaussian_filter1d
 
 from oracle import si, specutils, utils
-from oracle.models.model import Model, _log_prior_eval_environment
+from oracle.models.model import Model
 
 logger = logging.getLogger("oracle")
 
@@ -427,11 +427,7 @@ class GenerativeModel(Model):
             if 0 > theta_dict.get("instrumental_resolution_{0}".format(i), 1):
                 return -np.inf
         
-        ln_prior = 0
-        for parameter, distribution in self.config.get("priors", {}).iteritems():
-            f = eval(distribution, _log_prior_eval_environment)
-            ln_prior += f(theta_dict[parameter])
-        return ln_prior
+        return sum([self.evaluate_lnprior(p, v) for p, v in theta_dict.iteritems()])
 
 
     def _log_likelihood(self, theta, data, synth_kwargs):
