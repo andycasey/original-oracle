@@ -121,21 +121,59 @@ class ThereminModel(Model):
         return acceptable
 
 
-    def _excitation_ionisation_state(self, transitions, metallicity):
+    def _excitation_ionisation_state(self, transitions, metallicity, elements="all"):
+        """
+        Calculate the excitation and ionisation state for the transitions
+        provided.
+
+        :param transitions:
+            A record array containing atomic data of all the transitions.
+
+        :type transitions:
+            :class:`numpy.core.records.recordarray`
+
+        :param metallicity:
+            The model atmosphere metallicity to calculate the excitation and
+            ionisation state for.
+
+        :type metallicity:
+            float
+
+        :param elements: [optional]
+            Filter by particular elements such that only the listed elements 
+            will be used for the excitation and ionisation state.
+
+        :type elements:
+            tuple
+        """
+
+        # species indices
+        if isinstance(elements, (str, unicode)) and elements.lower() == "all":
+            indices = np.arange(len(transitions))
+
+        else:
+            if not isinstance(elements, (list, tuple)):
+                raise TypeError("elements must be a list or tuple of strings")
+
+            indices = []
+            for element in elements:
+                indices.extend(np.where(transitions["atomic_number"] == \
+                    utils.atomic_number(element)))
+            indices = np.array(list(set(sum(map(list, indices), []))))
 
         # Excitation
         exc_slope, exc_offset = line.fit(
-            x=transitions["excitation_potential"],
-            y=transitions["abundance"], full_output=True)[:2]
+            x=transitions["excitation_potential"][indices],
+            y=transitions["abundance"][indices], full_output=True)[:2]
         
         # Line strength
         lst_slope, lst_offset = line.fit(
-            x=np.log(transitions["equivalent_width"]/transitions["wavelength"]),
-            y=transitions["abundance"], full_output=True)[:2]
+            x=np.log(transitions["equivalent_width"]/transitions["wavelength"])[indices],
+            y=transitions["abundance"][indices], full_output=True)[:2]
 
         # Mean ionisation abundance
-        neutral = (transitions["ionised"] == 1)
-        ionised = ~neutral # Astronomers are lazy. What about Fe III+!
+        neutral = (transitions["ionised"][indices] == 1)
+        ionised = (transitions["ionised"][indices] == 2)
         if not any(ionised):
             logger.warn("No acceptable ionised lines!")
             return invalid_response
@@ -146,18 +184,6 @@ class ThereminModel(Model):
         # Metallicity state
         metallicity_state = np.median(transitions["abundance"][neutral]) \
             - metallicity
-
-
-        """
-        # Calculate crude, probably wrong, estimated uncertainties in slopes, etc.
-        u_exc_slope 
-
-        u_ionisation_state = np.std(transitions["abundance"][neutral] \
-            - )
-
-        u_metallicity_state = np.std(transitions["abundance"][neutral] \
-            - metallicity)/np.sqrt(len(transitions["abundance"][neutral]))
-        """
 
         return np.array([exc_slope, lst_slope, ionisation_state, metallicity_state])
 

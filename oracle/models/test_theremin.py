@@ -13,6 +13,8 @@ import theremin
 
 logger = logging.getLogger("oracle")
 
+#[5954.0, 4.6630000000000003, -0.30499999999999999, 1.222] is [-0.00093788 -0.00217835  0.00108488  0.00045862]
+
 config = {
     "model": {
         "continuum": False,
