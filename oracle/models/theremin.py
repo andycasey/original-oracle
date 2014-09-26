@@ -303,7 +303,7 @@ class ThereminModel(Model):
                 fig.savefig("{0}-iter{1}-state.png".format(plot_filename_prefix,
                     iteration))
                 logger.debug("Closing figure")
-                plt.close(fig)
+                plt.close("all")
 
                 # Have we reached the right plotting transition frequency
                 # (by iteration), or is it the first iteration?
@@ -340,7 +340,7 @@ class ThereminModel(Model):
                                 transition["instrumental_resolution"]))
                         fig.savefig(path)
                         logger.info("Created image {0}".format(path))
-                        plt.close(fig)
+                        plt.close("all")
 
             logger.info("State for {0} is {1} and took {2:.2f} seconds".format(
                 args, state, time() - t_a))
@@ -536,11 +536,11 @@ class ThereminModel(Model):
                         ["REJECTED", "ACCEPTED"][ok[i]], transition["instrumental_resolution"]))
                 fig.savefig(path)
                 logger.info("Created image {0}".format(path))
-                plt.close(fig)
+                plt.close("all")
 
         fig = plot_balance(initial_transitions[ok])
         fig.savefig("balance.png")
-        plt.close(fig)
+        plt.close("all")
         
         global use_initial_transitions
         use_initial_transitions = [True]
@@ -579,7 +579,7 @@ class ThereminModel(Model):
             ok = self._apply_constraints(transitions, constraints)
             fig = plot_balance(transitions[ok])
             fig.savefig("balance.png")
-            plt.close(fig)
+            plt.close("all")
 
             state = self._excitation_ionisation_state(transitions[ok], metallicity)
             if np.all(np.less_equal(np.abs(state), [1e-3, 1e-3, 1e-3, 1e-3])):
@@ -638,7 +638,7 @@ class ThereminModel(Model):
                             ["REJECTED", "ACCEPTED"][ok[i]]))
                     fig.savefig(path)
                     logger.info("Created image {0}".format(path))
-                    plt.close(fig)
+                    plt.close("all")
 
             if full_output:
                 return (opt, converged, opt_transitions, synthetic_spectra)

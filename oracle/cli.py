@@ -33,7 +33,7 @@ def _check_plot_format(plotting, plot_fmt):
     if plotting:
         fig = plt.figure()
         available = map(str.lower, fig.canvas.get_supported_filetypes().keys())
-        plt.close(fig)
+        plt.close("all")
 
         if plot_fmt.lower() not in available:
             raise ValueError("Plotting format {0} is not available on this "\
@@ -86,7 +86,7 @@ def solve_generative(args):
         path = image_path("{0}-initial.{1}", args)
         fig = oracle.plot.spectrum_comparison(data, model, initial_guess)
         fig.savefig(path)
-        plt.close(fig)
+        plt.close("all")
 
         logger.info("Saved model spectrum of initial theta to {0}".format(path))
         
@@ -98,7 +98,7 @@ def solve_generative(args):
         path = image_path("{0}-optimal.{1}", args)
         fig = oracle.plot.spectrum_comparison(data, model, optimised_theta)
         fig.savefig(path)
-        plt.close(fig)
+        plt.close("all")
 
         logger.info("Saved model spectrum of optimal theta to {0}".format(path))
     
@@ -116,13 +116,13 @@ def solve_generative(args):
         path = image_path("{0}-acceptance.{1}", args)
         fig = oracle.plot.acceptance_fractions(additional_info["mean_acceptance_fractions"])
         fig.savefig(path)
-        plt.close(fig)
+        plt.close("all")
 
         # Plot the values of the chains
         path = image_path("{0}-chains.{1}", args)
         fig = oracle.plot.chains(sampler.chain)
         fig.savefig(path)
-        plt.close(fig)
+        plt.close("all")
 
         # Make a corner plot [of just the astrophysical parameters]
         # [TODO]
@@ -131,7 +131,7 @@ def solve_generative(args):
         fig = triangle.corner(sampler.chain.reshape(-1, len(model.parameters))[index:, :],
             labels=oracle.utils.latexify(model.parameters))
         fig.savefig(path)
-        plt.close(fig)
+        plt.close("all")
 
 
 
@@ -195,7 +195,7 @@ def solve_classical(args):
         fig = oracle.plot.spectrum_comparison(data, model, model_spectra=model_spectra)
         fig.savefig(path)
         logger.info("Saved figure to {0}".format(path))
-        plt.close(fig)
+        plt.close("all")
 
 
     # Integrate the line profiles and optimise stellar parameters
@@ -218,7 +218,7 @@ def solve_classical(args):
         fig.savefig(path)
         fig.axes[0].set_title(["Not converged", "Converged"][op_converged])
         logger.info("Saved figure to {0}".format(path))
-        plt.close(fig)
+        plt.close("all")
 
     logger.info("Full analysis {1}took {0:.2f} seconds".format(time() - t_init,
         ["", "(including plotting) "][args.plotting]))
