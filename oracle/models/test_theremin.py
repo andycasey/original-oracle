@@ -31,6 +31,9 @@ config = {
             "np.abs(wavelength - 4861) > 100"
         ]
     },
+    "priors": {
+        "instrumental_resolution": "uniform(20000,30000)",
+    },
     "mask": [
         [4700, 4705.6588],
         [4705.7587, 4711.2],
