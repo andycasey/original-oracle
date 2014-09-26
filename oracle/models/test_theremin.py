@@ -22,6 +22,14 @@ config = {
     "ThereminModel": {
         "clean_line_list_filename": "../si/linedata/HERMES_clean.dat",
         "blend_line_list_filename": "../si/linedata/HERMES_blending.dat",
+        "line_constraints": [
+            "equivalent_width > 5", # mA 
+            "150 >= equivalent_width", # mA
+            "warnflag == 0",
+            # Avoid the Balmer lines
+            "np.abs(wavelength - 6563) > 100",
+            "np.abs(wavelength - 4861) > 100"
+        ]
     },
     "mask": [
         [4700, 4705.6588],

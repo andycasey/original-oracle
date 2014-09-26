@@ -32,14 +32,7 @@ class ConvergenceAchieved(BaseException):
 
 class ThereminModel(Model):
 
-    _default_constraints = [
-        "equivalent_width > 5", # mA 
-        "150 >= equivalent_width", # mA
-        "warnflag == 0",
-        # Avoid the Balmer lines
-        "np.abs(wavelength - 6563) > 100",
-        "np.abs(wavelength - 4861) > 100"
-    ]
+    _default_constraints = []
 
     def __init__(self, configuration):
         """
@@ -185,7 +178,8 @@ class ThereminModel(Model):
 
         :param constraints: [optional]
             Data quality constraints to apply to the transitions used for stellar
-            parameter determination.
+            parameter determination. If None, then it will default to what is
+            specified in the configuration file under ThereminModel -> line_constraints.
 
         :type constraints:
             list
@@ -202,7 +196,8 @@ class ThereminModel(Model):
             initial_theta = self.initial_guess()
 
         if constraints is None:
-            constraints = self._default_constraints
+            constraints = self.config["ThereminModel"].get("line_constraints",
+                self._default_constraints)
             
         # Some dumb-user (e.g., self-) checking
         convergence_rule = convergence_rule.lower()
