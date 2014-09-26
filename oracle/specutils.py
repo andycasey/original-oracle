@@ -322,34 +322,52 @@ class Spectrum1D(object):
                 hdu.writeto(filename, clobber=clobber)
 
 
-def _cross_correlate(dispersion, observed_flux, template_flux):
+def cross_correlate(observed, template, wavelength_range=None):
     """
     Return a redshift by cross correlation of a template and observed spectra.
 
-    :param dispersion:
-        The dispersion points of the observed and template fluxes.
+    :param observed:
+        The observed spectrum.
 
-    :type dispersion:
-        :class:`numpy.array`
+    :type observed:
+        :class:`Spectrum1D`
 
-    :param observed_flux:
-        The observed fluxes for each dispersion point.
+    :param template:
+        The template spectrum, expected to be at rest-frame.
 
-    :type observed_flux:
-        :class:`numpy.array`
+    :type template:
+        :class:`Spectrum1D`
 
-    :param template_flux:
-        The template fluxes for each dispersion point.
+    :param wavelength_range: [optional]
+        The (observed) start and ending wavelengths to use for the cross correlation.
 
-    :type template_flux:
-        :class:`numpy.array`
+    :type wavelength_range:
+        tuple
 
     :returns:
-        A redshift.
+        The relative velocity and associated uncertainty in km/s.
 
     :rtype:
-        float
+        tuple
     """
+
+    # Put the spectra on the same dispersion mapping
+    if wavelength_range is not None:
+        if not isinstance(wavelength_range, (list, tuple, np.array)) \
+        or len(wavelength_range) != 2:
+            raise TypeError("wavelength range must either be None or a two-length"\
+                " tuple-like object with the start and end wavelength ranges")
+
+        indices = observed.disp.searchsorted(wavelength_range)
+        dispersion = observed.disp[indices[0]:indices[1] + 1]
+        observed_flux = observed.flux[indices[0]:indices[1] + 1]
+
+    else:
+        dispersion = observed.disp
+        observed_flux = observed.flux
+
+    template_flux = np.interp(dispersion, template.disp, template.flux,
+        left=1, right=1)
 
     # Be forgiving, although we shouldn't have to be.
     N = np.min(map(len, [dispersion, observed_flux, template_flux]))
@@ -403,7 +421,8 @@ def _cross_correlate(dispersion, observed_flux, template_flux):
     ccf -= ccf.min()
     ccf *= (h/ccf.max())
 
+    c = 299792.458 # km/s
     z_best = z_array[ccf.argmax()]    
     z_err = (np.ptp(z_array[np.where(ccf >= 0.5*h)])/2.35482)**2
 
-    return z_best
+    return (z_best * c, z_err * c)
