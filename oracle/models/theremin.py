@@ -121,7 +121,7 @@ class ThereminModel(Model):
         return acceptable
 
 
-    def _excitation_ionisation_state(self, transitions, metallicity, elements="all"):
+    def _excitation_ionisation_state(self, transitions, metallicity):
         """
         Calculate the excitation and ionisation state for the transitions
         provided.
@@ -147,33 +147,25 @@ class ThereminModel(Model):
             tuple
         """
 
-        # species indices
-        if isinstance(elements, (str, unicode)) and elements.lower() == "all":
-            indices = np.arange(len(transitions))
-
-        else:
-            if not isinstance(elements, (list, tuple)):
-                raise TypeError("elements must be a list or tuple of strings")
-
-            indices = []
-            for element in elements:
-                indices.extend(np.where(transitions["atomic_number"] == \
-                    utils.atomic_number(element)))
-            indices = np.array(list(set(sum(map(list, indices), []))))
+        # Options:
+        # (1) use all lines for slope.
+        # (2) measure lines for each element and weight them by the # of measurements
+        # (3) measure lines for each element and weight them by some set of weights
+        
 
         # Excitation
         exc_slope, exc_offset = line.fit(
-            x=transitions["excitation_potential"][indices],
-            y=transitions["abundance"][indices], full_output=True)[:2]
+            x=transitions["excitation_potential"],
+            y=transitions["abundance"], full_output=True)[:2]
         
         # Line strength
         lst_slope, lst_offset = line.fit(
-            x=np.log(transitions["equivalent_width"]/transitions["wavelength"])[indices],
-            y=transitions["abundance"][indices], full_output=True)[:2]
+            x=np.log(transitions["equivalent_width"]/transitions["wavelength"]),
+            y=transitions["abundance"], full_output=True)[:2]
 
         # Mean ionisation abundance
-        neutral = (transitions["ionised"][indices] == 1)
-        ionised = (transitions["ionised"][indices] == 2)
+        neutral = (transitions["ionised"] == 1)
+        ionised = (transitions["ionised"] == 2)
         if not any(ionised):
             logger.warn("No acceptable ionised lines!")
             return invalid_response
@@ -181,8 +173,9 @@ class ThereminModel(Model):
         ionisation_state = np.median(transitions["abundance"][neutral]) \
             - np.median(transitions["abundance"][ionised])
 
-        # Metallicity state
-        metallicity_state = np.median(transitions["abundance"][neutral]) \
+        # Metallicity state (use Fe only)
+        fe_lines = (transitions["atomic_number"] == 26)
+        metallicity_state = np.median(transitions["abundance"][fe_lines]) \
             - metallicity
 
         return np.array([exc_slope, lst_slope, ionisation_state, metallicity_state])
@@ -252,6 +245,10 @@ class ThereminModel(Model):
         # At each stellar parameter test we need to re-fit all the lines
         # So we need another model class.
         model = SpectrumModel(self.config, data)
+
+        # Create an initial guess for the SpectrumModel parameters, which we will
+        # iterate upon in each excitation/ionization balance call.
+        #spectrum_model_initial_theta = model.initial_guess(**initial_theta)
 
         global sampled_parameters, parameter_states, start_count
         start_count = [0]
@@ -893,14 +890,44 @@ class SpectrumModel(Model):
         return data_index
 
 
-    def d(self, effective_temperature, surface_gravity, metallicity,
-        xi, resolution=25000):
+    def initial_guess(self, **kwargs):
         """
         Provide an initial guess of all the SpectrumModel model parameters
-        given some stellar parameters.
+        given some stellar parameters. This is usually called once before doing
+        any optimisation of the ThereminModel parameters.
         """
 
-        d = {}
+        initial_guess = {}
+        for p, v in kwargs.iteritems():
+            if p in self.parameters:
+                initial_guess[p] = v
+
+        # We should synthesise the blending regions and a mean model metallicity
+        # then use that to estimate the continuum?
+
+        # Any continuum?
+        # Make a fit to the continuum using pre-defined continuum regions
+        # TODO right now this assumes that you must have continuum regions
+        if self.config["model"]["continuum"]:
+            continuum_regions = self.config["ThereminModel"]["continuum_regions"]
+
+            for i, spectrum in enumerate(self.data):
+                # TODO this assumes polynomial
+                try:
+                    order = self.config["continuum"]["order"][i]
+                except IndexError:
+                    # no continuum required
+                    break
+
+                num_coefficients = order + 1
+
+                # Find continuum regions for this spectrum
+
+
+
+        # Need to match these to each of the data indices:
+
+
         synthesis_required = \
             (self.config["model"]["redshift"] or self.config["model"]["continuum"])
 

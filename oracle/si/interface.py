@@ -149,9 +149,11 @@ class instance(object):
         if env is not None:
             default_env.update(env)
 
+        t = time()
         p = Popen([self._executable],
             shell=shell, bufsize=2056, cwd=self.twd, stdin=PIPE, stdout=PIPE,
             stderr=PIPE, env=default_env, close_fds=True)
+        logger.debug("Subprocess call took {0:.3f} s".format(time() - t))
 
         if timeout != -1:
             signal(SIGALRM, alarm_handler)
@@ -412,16 +414,14 @@ class instance(object):
             abundances={utils.element(transition["atomic_number"]): abundance},
             full_output=True)
 
-        if " No line center within interval" in stdout:
-            logging.warn("No line center synthesised for transition at {0:.2f} A"\
-                " with [{1}/H] = {2:.2f}. Line is either too weak or not in the "\
-                "provided line list.".format(transition["wavelength"], 
+        if not np.any(spectrum[:, 1] < 1.):
+            logger.warn("No line center synthesised for transition at {0:.2f} A"\
+                " with [{1}/H] = {2:.2f}. Line is either too weak or not in the"\
+                " provided line list.".format(transition["wavelength"],
                     utils.element(transition["atomic_number"]), abundance))
             equivalent_width = 0
 
         else:
-            # Parse the equivalent width from the SI standard output
-            # Let's go backwards, it will be faster:
             stdout_split = stdout.split("\n")
             for line in stdout_split[::-1]:
                 if line.startswith(" equivalent width: "):
@@ -791,8 +791,6 @@ def find_abundance(transition, effective_temperature, surface_gravity,
 
     abundance_floor = [np.nan]
 
-
-
     with instance(transition=transition) as si:
 
         def func(args, full_output=False):
@@ -820,6 +818,10 @@ def find_abundance(transition, effective_temperature, surface_gravity,
         fopt = list(func(result, True))
 
         abundance = result[0] if fopt[2] > 0 else np.nan
+        
+        # Scale abundance with metallicity
+        abundance += metallicity
+
         if abs(fopt[0]) > xtol:
             logger.warn("Equivalent width tolerance mis-match for {0} {1} "\
                 "transition at {2:.3f}: {3:.2f} > {4:.2f}. [{0} {1} @ {2:.3f}/H]"\
