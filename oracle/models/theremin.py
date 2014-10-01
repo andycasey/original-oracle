@@ -121,7 +121,8 @@ class ThereminModel(Model):
         return acceptable
 
 
-    def _excitation_ionisation_state(self, transitions, metallicity):
+    def _excitation_ionisation_state(self, transitions, metallicity, mode,
+        elements="all"):
         """
         Calculate the excitation and ionisation state for the transitions
         provided.
@@ -147,41 +148,163 @@ class ThereminModel(Model):
             tuple
         """
 
-        # Options:
-        # (1) use all lines for slope.
-        # (2) measure lines for each element and weight them by the # of measurements
-        # (3) measure lines for each element and weight them by some set of weights
+        logger.debug("Using mode {0} for excitation and ionisation balance "\
+            "calculations".format(mode))
+
+        # species indices
+        if isinstance(elements, (str, unicode)) and elements.lower() == "all":
+            indices = np.arange(len(transitions))
+
+        else:
+            if not isinstance(elements, (list, tuple)):
+                raise TypeError("elements must be a list or tuple of strings")
+
+            indices = []
+            for element in elements:
+                indices.extend(np.where(transitions["atomic_number"] == \
+                    utils.atomic_number(element)))
+            indices = np.array(list(set(sum(map(list, indices), []))))
+
+        if mode == 1: 
+            # Excitation
+            exc_slope, exc_offset = line.fit(
+                x=transitions["excitation_potential"][indices],
+                y=transitions["abundance"][indices], full_output=True)[:2]
+            
+            # Line strength
+            lst_slope, lst_offset = line.fit(
+                x=np.log(transitions["equivalent_width"]/transitions["wavelength"])[indices],
+                y=transitions["abundance"][indices], full_output=True)[:2]
+
+            # Mean ionisation abundance
+            neutral = (transitions["ionised"][indices] == 1)
+            ionised = (transitions["ionised"][indices] == 2)
+            if not any(ionised):
+                logger.warn("No acceptable ionised lines!")
+                return invalid_response
+
+            ionisation_state = np.median(transitions["abundance"][neutral]) \
+                - np.median(transitions["abundance"][ionised])
+
+            # Metallicity state (use Fe only)
+            fe_lines = (transitions["atomic_number"] == 26)
+            metallicity_state = np.median(transitions["abundance"][fe_lines]) \
+                - metallicity
+
         
+        elif mode == 2:
 
-        # Excitation
-        exc_slope, exc_offset = line.fit(
-            x=transitions["excitation_potential"],
-            y=transitions["abundance"], full_output=True)[:2]
-        
-        # Line strength
-        lst_slope, lst_offset = line.fit(
-            x=np.log(transitions["equivalent_width"]/transitions["wavelength"]),
-            y=transitions["abundance"], full_output=True)[:2]
+            # Options:
+            # (1) use all lines for slope.
+            # (2) measure lines for each element and weight them by the # of measurements
+            # (3) measure lines for each element and weight them by some set of weights
 
-        # Mean ionisation abundance
-        neutral = (transitions["ionised"] == 1)
-        ionised = (transitions["ionised"] == 2)
-        if not any(ionised):
-            logger.warn("No acceptable ionised lines!")
-            return invalid_response
+            atomic_numbers = set(transitions["atomic_number"])
 
-        ionisation_state = np.median(transitions["abundance"][neutral]) \
-            - np.median(transitions["abundance"][ionised])
+            # Do excitation of individual elements
+            lst_slopes = np.zeros(len(atomic_numbers))
+            exc_slopes = np.zeros(len(atomic_numbers))
+            number_of_lines = np.zeros(len(atomic_numbers))
+            for i, atomic_number in enumerate(atomic_numbers):
+                indices = (transitions["atomic_number"] == atomic_number)
+                exc_slope, exc_offset = line.fit(
+                    x=transitions["excitation_potential"][indices],
+                    y=transitions["abundance"][indices], full_output=True)[:2]
 
-        # Metallicity state (use Fe only)
-        fe_lines = (transitions["atomic_number"] == 26)
-        metallicity_state = np.median(transitions["abundance"][fe_lines]) \
-            - metallicity
+                lst_slope, lst_offset = line.fit(
+                    x=np.log(transitions["equivalent_width"]/transitions["wavelength"])[indices],
+                    y=transitions["abundance"][indices], full_output=True)[:2]
+
+                lst_slopes[i] = lst_slope
+                exc_slopes[i] = exc_slope
+                number_of_lines[i] = sum(indices)
+
+            # Calculate excitation balance slope from the weighted mean of the 
+            # individual elements
+            exc_slope = (exc_slopes * number_of_lines)/number_of_lines.sum()
+
+            # Calculate line strength balance slope from the weighted mean of the
+            # individual elements
+            lst_slope = (lst_slopes * number_of_lines)/number_of_lines.sum()
+
+            # Do mean ionisation state of individual elements
+            ionisation_states = []
+            for atomic_number in set(transitions["atomic_number"]):
+                indices = (transitions["atomic_number"] == atomic_number)
+
+                neutral = (transitions["ionised"] == 1) * indices
+                ionised = (transitions["ionised"] == 2) * indices
+
+                ionisation_state = np.median(transitions["abundance"][neutral]) \
+                    - np.median(transitions["abundance"][ionised])
+                ionisation_states.append(ionisation_state)
+
+            # Metallicity state (use Fe only)
+            fe_lines = (transitions["atomic_number"] == 26)
+            metallicity_state = np.median(transitions["abundance"][fe_lines]) \
+                - metallicity
+
+        elif mode == 3:
+
+            # Options:
+            # (1) use all lines for slope.
+            # (2) measure lines for each element and weight them by the # of measurements
+            # (3) measure lines for each element and weight them by some set of weights
+
+            atomic_numbers = set(transitions["atomic_number"])
+
+            # Do excitation of individual elements
+            lst_slopes = np.zeros(len(atomic_numbers))
+            exc_slopes = np.zeros(len(atomic_numbers))
+            for i, atomic_number in enumerate(atomic_numbers):
+                indices = (transitions["atomic_number"] == atomic_number)
+                exc_slope, exc_offset = line.fit(
+                    x=transitions["excitation_potential"][indices],
+                    y=transitions["abundance"][indices], full_output=True)[:2]
+
+                lst_slope, lst_offset = line.fit(
+                    x=np.log(transitions["equivalent_width"]/transitions["wavelength"])[indices],
+                    y=transitions["abundance"][indices], full_output=True)[:2]
+
+                lst_slopes[i] = lst_slope
+                exc_slopes[i] = exc_slope
+                
+            # Weight each element evenly
+            weights = np.ones(len(atomic_numbers)) * 1./len(atomic_numbers)
+
+            # Calculate excitation balance slope from the weighted mean of the 
+            # individual elements
+            exc_slope = (exc_slopes * weights)/weights.sum()
+
+            # Calculate line strength balance slope from the weighted mean of the
+            # individual elements
+            lst_slope = (lst_slopes * weights)/weights.sum()
+
+            # Do mean ionisation state of individual elements
+            ionisation_states = []
+            for atomic_number in set(transitions["atomic_number"]):
+                indices = (transitions["atomic_number"] == atomic_number)
+
+                neutral = (transitions["ionised"] == 1) * indices
+                ionised = (transitions["ionised"] == 2) * indices
+
+                ionisation_state = np.median(transitions["abundance"][neutral]) \
+                    - np.median(transitions["abundance"][ionised])
+                ionisation_states.append(ionisation_state)
+
+            # Metallicity state (use Fe only)
+            fe_lines = (transitions["atomic_number"] == 26)
+            metallicity_state = np.median(transitions["abundance"][fe_lines]) \
+                - metallicity
+
+        else:
+            raise ValueError("no known mode")
 
         return np.array([exc_slope, lst_slope, ionisation_state, metallicity_state])
 
 
     def optimise(self, data, initial_theta=None, constraints=None,
+        balance_mode=1,
         state_tolerance=[1e-3, 1e-3, 1e-2, 1e-2], 
         parameter_tolerance=[5, 0.01, 0.01, 0.01], convergence_rule="or",
         op_kwds=None, plotting=True,

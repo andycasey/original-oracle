@@ -17,13 +17,18 @@ logger = logging.getLogger("oracle")
 
 config = {
     "model": {
-        "continuum": False,
+        "continuum": True,
         "redshift": False,
         "instrumental_broadening": True
+    },
+    "continuum": {
+        "method": "polynomial",
+        "order": [3, 3, 3, 3]
     },
     "ThereminModel": {
         "clean_line_list_filename": "../si/linedata/HERMES_clean.dat",
         "blend_line_list_filename": "../si/linedata/HERMES_blending.dat",
+        "balance_mode": 2,
         "line_constraints": [
             "equivalent_width > 5", # mA 
             "150 >= equivalent_width", # mA
@@ -333,12 +338,15 @@ for benchmark in benchmarks:
     data.sort(key=lambda s: s.disp[0])
 
     model = theremin.ThereminModel(config)
+    spectrum_model = theremin.SpectrumModel(config, data)
+    break
 
     # Optimise the model parameters and plot the transition fits at every 10th
     # iteration of stellar parameters
-    parameters, state, converged, transitions, spectra, sampled_parameters,
+    parameters, state, converged, transitions, spectra, sampled_parameters, \
         sampled_states = model.optimise(data, plotting=True, 
-        plot_transition_frequency=10, plot_filename_prefix=benchmark)
+        plot_transition_frequency=10, plot_filename_prefix=benchmark,
+        balance_mode=model.config["ThereminModel"].get("balance_mode", 1))
 
     if converged:
         # Do something with the results?
