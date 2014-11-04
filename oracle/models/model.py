@@ -167,7 +167,9 @@ class Model(object):
         return f(value)
 
 
-    def mask(self, dispersion, z=0., fill_value=np.nan, use_cached=False):
+
+    def mask(self, dispersion, z=0., fill_value=np.nan, use_cached=False,
+        mask_regions=None):
         """
         Return an array mask for a given dispersion array and redshift, based on
         the mask information provided in the model configuration file.
@@ -198,6 +200,9 @@ class Model(object):
             :class:`numpy.array`
         """
 
+        # If kwargs contains a 
+
+
         if z == 0 and use_cached: 
             try:
                 # Speed hack: see if we have a copy of a rest-frame mask.
@@ -205,11 +210,11 @@ class Model(object):
             except AttributeError:
                 None
 
-        mask_regions = self.config.get("mask", None)
-        if mask_regions is not None:
+        use_mask_regions = self.config.get("mask", mask_regions)
+        if use_mask_regions is not None:
             mask = np.ones(len(dispersion))
-            mask_regions = np.array(mask_regions)
-            for start, end in mask_regions * (1. + z):
+            use_mask_regions = np.array(use_mask_regions)
+            for start, end in use_mask_regions * (1. + z):
                 indices = dispersion.searchsorted([start, end])
                 mask[indices[0]:indices[1] + 1] = fill_value
 
