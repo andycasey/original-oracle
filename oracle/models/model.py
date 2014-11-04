@@ -1,36 +1,34 @@
 # coding: utf-8
 
-from __future__ import absolute_import, print_function
 
 """ An abstract model class for stellar spectra """
 
+
+from __future__ import absolute_import, print_function
+
+__all__ = ["Model"]
 __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 
 import logging
 import os
+import json
 import yaml
 import numpy as np
+from hashlib import md5
 from functools import partial
 from scipy import stats
 
-__all__ = ["Model"]
-
 logger = logging.getLogger("oracle")
 
-_prior_env = { 
-    "locals": None,
-    "globals": None,
-    "__name__": None,
-    "__file__": None,
-    "__builtins__": None,
-    "uniform": lambda a, b: partial(stats.uniform.logpdf, **{"loc": a, "scale": b - a}),
-    "normal": lambda a, b: partial(stats.norm.logpdf, **{"loc": a, "scale": b})
-}
-
+from oracle import utils
+from oracle.models import validate
 
 class Model(object):
 
-    def __init__(self, configuration):
+    # Default configuration
+    config = {}
+
+    def __init__(self, configuration, validate=True):
         """
         A general class to probabilistically model stellar spectra.
 
@@ -45,15 +43,13 @@ class Model(object):
         """
 
         if isinstance(configuration, dict):
-            # Make a copy of the configuration.
-            self.config = {}
-            self.config.update(configuration)
+            self.config = utils.update_recursively(self.config, configuration)
 
         else:
             if not os.path.exists(configuration):
                 # Probably a string configuration.
                 try:
-                    self.config = yaml.load(configuration)
+                    supplied_configuration = yaml.load(configuration)
 
                 except:
                     raise IOError("configuration file does not exist or the"\
@@ -61,110 +57,57 @@ class Model(object):
                         "dictionary")
                 else:
                     # We expect a dictionary.
-                    if not isinstance(self.config, dict):
+                    if not isinstance(configuration, dict):
                         raise IOError("configuration file does not exist or the"\
                             " YAML string provided does not describe a valid "\
                             "dictionary")
+
+                    self.config = utils.update_recursively(self.config,
+                        supplied_configuration)
             else:
                 with open(configuration, "r") as fp:
-                    self.config = yaml.load(fp)
+                    supplied_configuration = yaml.load(fp)
 
-        # Check the configuration is valid.
-        self._validate()
-        return None
+                self.config = utils.update_recursively(self.config,
+                    supplied_configuration)
 
-
-    def _validate(self):
-        """ Check that the configuration is valid. """
-
-        # Default things that we should have.
-        self.config.setdefault("mask", [])
-        self.config["mask"] = np.array(self.config["mask"])
-
-        if not self.config.has_key("model"):
-            raise KeyError("no model information specified")
-
-        validation_functions = {
-            "continuum": self._validate_continuum,
-            "elements": self._validate_elements
-        }
-        for item, state in self.config["model"].iteritems():
-            if not state or item not in validation_functions: continue
-            validation_functions[item]()
-
-        return True
+        if validate:
+            return validation.validate_configuration(self.config)
 
 
-    def _validate_continuum(self):
-        """ Check that the continuum configuration is valid. """
+    def __str__(self):
+        return unicode(self).encode("utf-8")
+
+
+    def __unicode__(self):
+        num_channels = len(self.channels)
+        num_models = len(self.grid_points) * num_channels
+        num_pixels = sum([len(d) * num_models for d in self.dispersion.values()])
         
-        # We actually need *something* specified to model the continuum.
-        if not self.config.has_key("continuum"):
-            raise KeyError("no information specified for continuum modelling")
-
-        order = self.config["continuum"]["order"]
-        assert self.config["continuum"]["method"] == "polynomial"
-        assert order
-
-        # Order should be integer or list-like of integers.
-        try: order = [int(order)]
-        except:
-            try: order = map(int, order)
-            except:
-                raise TypeError("continuum order must be an integer or a list-\
-                    like of integers")
-        self.config["continuum"]["order"] = order
-        
-        return True
+        return u"{module}.Model({num_models} {is_cached} models; "\
+            "{num_total_parameters} parameters: {num_extra} "\
+            "additional parameters, {num_grid_parameters} grid parameters: "\
+            "{parameters}; {num_channels} channels: {channels}; ~{num_pixels} "\
+            "pixels)".format(module=self.__module__, num_models=num_models, 
+            num_channels=num_channels, channels=', '.join(self.channels), 
+            num_pixels=utils.human_readable_digit(num_pixels),
+            num_total_parameters=len(self.parameters), 
+            is_cached=["", "cached"][self.cached],
+            num_extra=len(self.parameters) - len(self.grid_points.dtype.names), 
+            num_grid_parameters=len(self.grid_points.dtype.names),
+            parameters=', '.join(self.grid_points.dtype.names))
 
 
-    def _validate_elements(self):
-        """ Check that the elements actually exist. """
-
-        map(utils.atomic_number, self.config["model"]["elements"])
-        return True
+    def __repr__(self):
+        return u"<{0}.Model object with hash {1} at {2}>".format(self.__module__,
+            self.hash[:10], hex(id(self)))
 
 
-    @classmethod
-    def _opt_warn_message(cls, warnflag, niter, nfunc, desc=None):
-        """ Log a warning message after optimisation. """
+    @property
+    def hash(self):
+        """ Return a MD5 hash of the JSON-dumped model configuration. """ 
+        return md5(json.dumps(self.config).encode("utf-8")).hexdigest()
 
-        if warnflag > 0:
-
-            desc = desc if desc is not None else ""
-            message = [
-                "Che problem?",
-                "Maximum number of function evaluations ({0}) made{1}".format(
-                    nfunc, desc),
-                "Maximum number of iterations ({0}) made{1}".format(niter, desc)
-            ]
-            logger.warn("{0}. Optimised values may be inaccurate.".format(
-                message[warnflag]))
-        return None
-
-
-    def evaluate_lnprior(self, parameter, value):
-        """
-        Evaluate the logarithmic prior probability as specified in the input
-        configuration file for a given parameter at a given theta value.
-
-        :param parameter:
-            The model parameter to evaluate.
-
-        :type parameter:
-            str
-        
-        :param value:
-            The value of the input theta value to evaluate the prior probability
-            for.
-
-        :type value:
-            float
-        """
-
-        f = eval(self.config.get("priors", {}).get(parameter, "lambda x: 0"),
-            _prior_env)
-        return f(value)
 
 
 

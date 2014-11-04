@@ -6,8 +6,8 @@ __author__ = "Andy Casey <arc@ast.cam.ac.uk>"
 
 __all__ = ["atomic_number", "element", "reflect_about", "latexify"]
 
+import collections
 import logging
-from collections import namedtuple
 from functools import update_wrapper
 from threading import RLock
 
@@ -15,6 +15,39 @@ import numpy as np
 from scipy.special import wofz
 
 logger = logging.getLogger("oracle")
+
+
+def update_recursively(original, new):
+    """
+    Recursively update a nested dictionary.
+    
+    :param original:
+        The original nested dictionary to update.
+
+    :type original:
+        dict
+
+    :param new:
+        The nested dictionary to use to update the original.
+
+    :type new:
+        dict
+
+    :returns:
+        The updated original dictionary.
+
+    :rtype:
+        dict
+    """
+
+    for k, v in new.iteritems():
+        if isinstance(v, collections.Mapping) \
+        and isinstance(original.get(k, None), collections.Mapping):
+            r = update_recursively(original.get(k, {}), v)
+            original[k] = r
+        else:
+            original[k] = new[k]
+    return original
 
 
 def invert_mask(mask, data=None, limits=(0, 10e5), padding=0):
@@ -60,7 +93,8 @@ def invert_mask(mask, data=None, limits=(0, 10e5), padding=0):
 
 
 
-_CacheInfo = namedtuple("CacheInfo", ["hits", "misses", "maxsize", "currsize"])
+_CacheInfo = collections.namedtuple("CacheInfo",
+    ["hits", "misses", "maxsize", "currsize"])
 
 class _HashedSeq(list):
     __slots__ = 'hashvalue'
