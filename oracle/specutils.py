@@ -16,6 +16,7 @@ import os
 import numpy as np
 import pyfits
 
+
 class Spectrum(object):
     """ A general spectrum class. """
 
@@ -426,3 +427,102 @@ def cross_correlate(observed, template, wavelength_range=None):
     z_err = (np.ptp(z_array[np.where(ccf >= 0.5*h)])/2.35482)**2
 
     return (z_best * c, z_err * c)
+
+
+
+def _ccf(apod_template_flux, template_flux_corr, N):
+
+    denominator = np.sqrt(np.inner(apod_template_flux, apod_template_flux))
+    flux_correlation = template_flux_corr / denominator 
+    correlation = np.fft.ifft(flux_correlation).real
+
+    # Reflect about zero
+    ccf = np.zeros(N)
+    ccf[:N/2] = correlation[N/2:]
+    ccf[N/2:] = correlation[:N/2]
+
+    # Get height and redshift of best peak
+    h = ccf.max()
+
+    # Scale the CCF
+    ccf -= ccf.min()
+    ccf *= (h/ccf.max())
+
+    return (ccf.argmax(), np.where(ccf >= 0.5 * h), h)
+
+
+def cross_correlate_grid(template_dispersion, template_fluxes,
+    observed_spectrum, continuum_order=3, apodize=0.10, threads=1):
+
+    if template_dispersion.shape[0] != template_fluxes.shape[1]:
+        raise ValueError("template dispersion must have size (N_pixels,) and "\
+            "template fluxes must have size (N_models, N_pixels)")
+
+    if not isinstance(observed_spectrum, Spectrum1D):
+        raise TypeError("observed spectrum must be a Spectrum1D object")
+
+    try:
+        continuum_order = int(continuum_order)
+    except (TypeError, ValueError):
+        raise TypeError("continuum order must be an integer-like object")
+
+    assert 1 > apodize >= 0, "Apodisation fraction must be between 0 and 1"
+    
+    N = template_dispersion.size
+    N = N - 1 if N % 2 > 0 else N
+    N_models = template_fluxes.shape[0]
+
+    dispersion = template_dispersion[:N]
+    template_flux = template_fluxes[:, :N]
+
+    observed_flux = np.interp(dispersion, observed_spectrum.disp,
+        observed_spectrum.flux, left=np.nan, right=np.nan)
+
+    non_finite = ~np.isfinite(observed_flux)
+    observed_flux[non_finite] = np.interp(dispersion[non_finite],
+        dispersion[~non_finite], observed_flux[~non_finite])
+
+    # Normalise
+    if continuum_order >= 0:
+        coeffs = np.polyfit(dispersion, observed_flux, continuum_order)
+        observed_flux /= np.polyval(coeffs, dispersion)
+
+    # Scale the flux level to that the template intensities
+    observed_flux = (observed_flux * template_flux.ptp()) + template_flux.min()
+
+    # Apodize edges
+    edge_buffer = apodize * (dispersion[-1] - dispersion[0])
+    low_w_indices = np.nonzero(dispersion < dispersion[0] + edge_buffer)[0]
+    high_w_indices = np.nonzero(dispersion > dispersion[-1] - edge_buffer)[0]
+
+    apod_curve = np.ones(N, dtype='d')
+    apod_curve[low_w_indices] = (1.0 + np.cos(np.pi*(
+        1.0 - (dispersion[low_w_indices] - dispersion[0])/edge_buffer)))/2.
+    apod_curve[high_w_indices] = (1.0 + np.cos(np.pi*(
+        1.0 - (dispersion[-1] - dispersion[high_w_indices])/edge_buffer)))/2.
+
+    apod_observed_flux = observed_flux * apod_curve
+    apod_template_flux = template_flux * apod_curve
+
+    fft_observed_flux = np.fft.fft(apod_observed_flux)
+    fft_template_flux = np.fft.fft(apod_template_flux)
+    template_flux_corr = (fft_observed_flux * fft_template_flux.conjugate())
+    template_flux_corr /= np.sqrt(np.inner(apod_observed_flux, apod_observed_flux))
+
+    z_array = np.array(dispersion.copy())/dispersion[N/2] - 1.0
+
+    z = np.ones(N_models) * np.nan
+    z_err = np.ones(N_models) * np.nan
+    R = np.ones(N_models) * np.nan
+
+    # Thread this!
+    for i in xrange(N_models):
+
+        best_index, err_index, h = _ccf(apod_template_flux[i, :],
+            template_flux_corr[i, :], N)
+
+        z[i] = z_array[best_index]
+        z_err[i] = (np.ptp(z_array[err_index])/2.35482)**2
+        R[i] = h
+
+    return (z * 299792.458, z_err * 299792.458, R)

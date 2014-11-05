@@ -80,36 +80,18 @@ class Model(object):
 
 
     def __unicode__(self):
-        num_channels = len(self.channels)
-        num_models = len(self.grid_points) * num_channels
-        num_pixels = sum([len(d) * num_models for d in self.dispersion.values()])
-        
-        return u"{module}.Model({num_models} {is_cached} models; "\
-            "{num_total_parameters} parameters: {num_extra} "\
-            "additional parameters, {num_grid_parameters} grid parameters: "\
-            "{parameters}; {num_channels} channels: {channels}; ~{num_pixels} "\
-            "pixels)".format(module=self.__module__, num_models=num_models, 
-            num_channels=num_channels, channels=', '.join(self.channels), 
-            num_pixels=utils.human_readable_digit(num_pixels),
-            num_total_parameters=len(self.parameters), 
-            is_cached=["", "cached"][self.cached],
-            num_extra=len(self.parameters) - len(self.grid_points.dtype.names), 
-            num_grid_parameters=len(self.grid_points.dtype.names),
-            parameters=', '.join(self.grid_points.dtype.names))
+        return u"{module}.Model class".format(module=self.__module__)
 
 
     def __repr__(self):
-        return u"<{0}.Model object with hash {1} at {2}>".format(self.__module__,
-            self.hash[:10], hex(id(self)))
-
+        return u"<{module}.Model object with hash {hash} at {location}>".format(
+            module=self.__module__, hash=self.hash[:10], location=hex(id(self)))
 
     @property
     def hash(self):
         """ Return a MD5 hash of the JSON-dumped model configuration. """ 
         return md5(json.dumps(self.config).encode("utf-8")).hexdigest()
-
-
-
+    
 
     def mask(self, dispersion, z=0., fill_value=np.nan, use_cached=False,
         mask_regions=None):
